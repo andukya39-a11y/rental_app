@@ -1,6 +1,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import '../models/booking_model.dart';
+import 'firebase_messaging_service.dart';
 
 class BookingService {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
@@ -45,7 +46,17 @@ class BookingService {
         verificationStatus: verificationStatus, // Set verification status
       );
 
-      await _firestore.collection(_collectionName).add(booking.toMap());
+      final docRef =
+          await _firestore.collection(_collectionName).add(booking.toMap());
+
+      // Notify landlord about new booking request
+      FirebaseMessagingService().createNotification(
+        userId: landlordId,
+        title: 'New Booking Request',
+        message: '$tenantName requested to book "$houseTitle"',
+        type: 'booking_request',
+        relatedId: docRef.id,
+      );
     } catch (e) {
       throw Exception('Failed to create booking request: $e');
     }
@@ -92,11 +103,41 @@ class BookingService {
   Future<void> updateBookingStatus(String bookingId, String status,
       {String? message}) async {
     try {
+      // Get the booking to determine who to notify
+      final bookingDoc =
+          await _firestore.collection(_collectionName).doc(bookingId).get();
+      final bookingData = bookingDoc.data();
+      final tenantId = bookingData?['tenantId'] ?? '';
+      final houseTitle = bookingData?['houseTitle'] ?? 'Property';
+
       await _firestore.collection(_collectionName).doc(bookingId).update({
         'status': status,
         'updatedAt': DateTime.now(),
         if (message != null) 'message': message,
       });
+
+      // Notify tenant about booking status change
+      if (tenantId.isNotEmpty) {
+        if (status == 'confirmed') {
+          FirebaseMessagingService().createNotification(
+            userId: tenantId,
+            title: 'Booking Accepted',
+            message:
+                'Your booking request for "$houseTitle" has been accepted!',
+            type: 'booking_accepted',
+            relatedId: bookingId,
+          );
+        } else if (status == 'rejected') {
+          FirebaseMessagingService().createNotification(
+            userId: tenantId,
+            title: 'Booking Rejected',
+            message:
+                'Your booking request for "$houseTitle" has been rejected.',
+            type: 'booking_rejected',
+            relatedId: bookingId,
+          );
+        }
+      }
     } catch (e) {
       throw Exception('Failed to update booking status: $e');
     }

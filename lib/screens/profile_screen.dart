@@ -1,8 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:url_launcher/url_launcher.dart';
 import 'package:rental_app/services/house_service.dart';
+import 'package:rental_app/services/booking_service.dart';
+import 'package:rental_app/services/review_service.dart';
 import 'package:rental_app/screens/add_house_screen.dart';
+import 'package:rental_app/screens/edit_house_screen.dart';
 import 'package:rental_app/screens/my_bookings_screen.dart';
+import 'package:rental_app/screens/landlord_bookings_screen.dart';
 import 'package:rental_app/screens/house_detail_screen.dart';
 import 'package:rental_app/screens/preferences_screen.dart';
 import 'package:rental_app/screens/sheha_dashboard_screen.dart';
@@ -19,9 +24,13 @@ class ProfileScreen extends StatefulWidget {
 
 class _ProfileScreenState extends State<ProfileScreen> {
   final HouseService _houseService = HouseService();
+  final BookingService _bookingService = BookingService();
+  final ReviewService _reviewService = ReviewService();
   User? _user;
   bool _isLoading = true;
   List<HouseModel> _myListings = [];
+  int _bookingsCount = 0;
+  int _reviewsCount = 0;
 
   @override
   void initState() {
@@ -29,21 +38,27 @@ class _ProfileScreenState extends State<ProfileScreen> {
     _loadUserData();
   }
 
-  Future<void> _loadUserData() async {
+Future<void> _loadUserData() async {
     setState(() => _isLoading = true);
     try {
       final user = FirebaseAuth.instance.currentUser;
       if (user != null) {
         setState(() {
           _user = user;
-          _isLoading = false;
         });
         final listings = await _houseService.getHousesByUserId(user.uid);
-        if (mounted) {
-          setState(() {
-            _myListings = listings;
-          });
-        }
+        if (!mounted) return;
+        setState(() {
+          _myListings = listings;
+        });
+        final tenantBookings = await _bookingService.getTenantBookingRequests(user.uid).first;
+        final userReviews = await _reviewService.getReviewsByUser(user.uid);
+        if (!mounted) return;
+        setState(() {
+          _bookingsCount = tenantBookings.length;
+          _reviewsCount = userReviews.length;
+          _isLoading = false;
+        });
       } else {
         if (mounted) setState(() => _isLoading = false);
       }
@@ -84,6 +99,14 @@ class _ProfileScreenState extends State<ProfileScreen> {
     Navigator.of(context).push(
       MaterialPageRoute(
         builder: (_) => const MyBookingsScreen(),
+      ),
+    );
+  }
+
+  void _navigateToManageBookings() {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => const LandlordBookingsScreen(),
       ),
     );
   }
@@ -312,7 +335,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
         mainAxisSize: MainAxisSize.min,
         children: [
           Icon(
-            isVerified ? Icons.verified_user_rounded : Icons.error_outline_rounded,
+            isVerified
+                ? Icons.verified_user_rounded
+                : Icons.error_outline_rounded,
             size: 14,
             color: isVerified ? Colors.green[700] : Colors.red[700],
           ),
@@ -357,7 +382,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
             child: _StatItem(
               icon: Icons.calendar_month_rounded,
               label: 'Bookings',
-              value: '0',
+              value: _bookingsCount.toString(),
             ),
           ),
           Container(
@@ -369,7 +394,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
             child: _StatItem(
               icon: Icons.star_rounded,
               label: 'Reviews',
-              value: '0',
+              value: _reviewsCount.toString(),
             ),
           ),
         ],
@@ -390,6 +415,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
         label: 'My Bookings',
         subtitle: 'Track rental requests',
         onTap: _navigateToMyBookings,
+      ),
+      _ProfileAction(
+        icon: Icons.assignment_rounded,
+        label: 'Manage Bookings',
+        subtitle: 'Accept or reject tenant requests',
+        onTap: _navigateToManageBookings,
       ),
       _ProfileAction(
         icon: Icons.tune_rounded,
@@ -467,7 +498,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
               ],
             ),
             const SizedBox(height: 12),
-            if (_myListings.isEmpty) _buildEmptyListings() else _buildListingsList(),
+            if (_myListings.isEmpty)
+              _buildEmptyListings()
+            else
+              _buildListingsList(),
           ],
         ),
       ),
@@ -667,9 +701,8 @@ class _ProfileActionCard extends StatelessWidget {
               child: Icon(
                 action.icon,
                 size: 20,
-                color: action.isDestructive
-                    ? Colors.red[600]
-                    : AppColors.primary,
+                color:
+                    action.isDestructive ? Colors.red[600] : AppColors.primary,
               ),
             ),
             const SizedBox(width: 14),
@@ -779,7 +812,8 @@ class MyListingsScreen extends StatelessWidget {
                     ],
                   ),
                   child: ListTile(
-                    leading: house.imageUrl != null && house.imageUrl!.isNotEmpty
+                    leading: house.imageUrl != null &&
+                            house.imageUrl!.isNotEmpty
                         ? ClipRRect(
                             borderRadius: BorderRadius.circular(10),
                             child: Image.network(
@@ -809,9 +843,109 @@ class MyListingsScreen extends StatelessWidget {
                       'TSh ${house.price.toStringAsFixed(0)}/mo',
                       style: const TextStyle(color: AppColors.primary),
                     ),
-                    trailing: Icon(
-                      Icons.chevron_right_rounded,
-                      color: AppColors.textSecondary.withValues(alpha: 0.5),
+                    trailing: PopupMenuButton<String>(
+                      icon: Icon(
+                        Icons.more_vert_rounded,
+                        color: AppColors.textSecondary.withValues(alpha: 0.5),
+                      ),
+                      onSelected: (value) async {
+                        if (value == 'edit') {
+                          await Navigator.of(context).push<bool>(
+                            MaterialPageRoute(
+                              builder: (_) => EditHouseScreen(house: house),
+                            ),
+                          );
+                          if (context.mounted) {
+                            Navigator.of(context).pop(true);
+                          }
+                        } else if (value == 'delete') {
+                          final confirmed = await showDialog<bool>(
+                            context: context,
+                            builder: (context) => AlertDialog(
+                              shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(16)),
+                              title: const Text(
+                                'Delete Listing?',
+                                style: TextStyle(fontWeight: FontWeight.w700),
+                              ),
+                              content: Text(
+                                'Are you sure you want to permanently delete "${house.title}"? This action cannot be undone.',
+                                style: const TextStyle(fontSize: 14),
+                              ),
+                              actions: [
+                                TextButton(
+                                  onPressed: () =>
+                                      Navigator.of(context).pop(false),
+                                  child: const Text('Cancel'),
+                                ),
+                                ElevatedButton(
+                                  onPressed: () =>
+                                      Navigator.of(context).pop(true),
+                                  style: ElevatedButton.styleFrom(
+                                    backgroundColor: Colors.red,
+                                    foregroundColor: Colors.white,
+                                    shape: RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(10),
+                                    ),
+                                  ),
+                                  child: const Text('Delete'),
+                                ),
+                              ],
+                            ),
+                          );
+                          if (confirmed == true) {
+                            try {
+                              await HouseService().deleteHouse(house.id);
+                              if (context.mounted) {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(
+                                    content:
+                                        Text('Listing deleted successfully'),
+                                    backgroundColor: Colors.green,
+                                    behavior: SnackBarBehavior.floating,
+                                  ),
+                                );
+                                Navigator.of(context).pop(true);
+                              }
+                            } catch (e) {
+                              if (context.mounted) {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(
+                                    content: Text('Failed to delete: $e'),
+                                    backgroundColor: Colors.red,
+                                    behavior: SnackBarBehavior.floating,
+                                  ),
+                                );
+                              }
+                            }
+                          }
+                        }
+                      },
+                      itemBuilder: (context) => [
+                        const PopupMenuItem(
+                          value: 'edit',
+                          child: Row(
+                            children: [
+                              Icon(Icons.edit_rounded,
+                                  size: 18, color: AppColors.primary),
+                              SizedBox(width: 10),
+                              Text('Edit'),
+                            ],
+                          ),
+                        ),
+                        const PopupMenuItem(
+                          value: 'delete',
+                          child: Row(
+                            children: [
+                              Icon(Icons.delete_rounded,
+                                  size: 18, color: Colors.red),
+                              SizedBox(width: 10),
+                              Text('Delete',
+                                  style: TextStyle(color: Colors.red)),
+                            ],
+                          ),
+                        ),
+                      ],
                     ),
                     onTap: () {
                       Navigator.of(context).push(
@@ -872,21 +1006,286 @@ class MyListingsScreen extends StatelessWidget {
   }
 }
 
-class SettingsScreen extends StatelessWidget {
+class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
+
+  @override
+  State<SettingsScreen> createState() => _SettingsScreenState();
+}
+
+class _SettingsScreenState extends State<SettingsScreen> {
+  final TextEditingController _currentPasswordController = TextEditingController();
+  final TextEditingController _newPasswordController = TextEditingController();
+  final TextEditingController _confirmPasswordController = TextEditingController();
+  bool _isChangingPassword = false;
+  bool _isDeletingAccount = false;
+
+  @override
+  void dispose() {
+    _currentPasswordController.dispose();
+    _newPasswordController.dispose();
+    _confirmPasswordController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _changePassword() async {
+    if (_newPasswordController.text != _confirmPasswordController.text) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('New passwords do not match')),
+      );
+      return;
+    }
+
+    setState(() => _isChangingPassword = true);
+    try {
+      final user = FirebaseAuth.instance.currentUser;
+      if (user == null) throw Exception('User not authenticated');
+
+      final credential = EmailAuthProvider.credential(
+        email: user.email!,
+        password: _currentPasswordController.text,
+      );
+
+      await user.reauthenticateWithCredential(credential);
+      await user.updatePassword(_newPasswordController.text);
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Password updated successfully')),
+        );
+        _currentPasswordController.clear();
+        _newPasswordController.clear();
+        _confirmPasswordController.clear();
+      }
+    } on FirebaseAuthException catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(e.message ?? 'Failed to change password')),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error: $e')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isChangingPassword = false);
+    }
+  }
+
+  Future<void> _deleteAccount() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Text(
+          'Delete Account?',
+          style: TextStyle(fontWeight: FontWeight.w700),
+        ),
+        content: const Text(
+          'This action cannot be undone. All your listings, bookings, and reviews will be permanently deleted.',
+          style: TextStyle(fontSize: 14),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.red,
+              foregroundColor: Colors.white,
+            ),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true) return;
+
+    setState(() => _isDeletingAccount = true);
+    try {
+      final user = FirebaseAuth.instance.currentUser;
+      if (user != null) {
+        await user.delete();
+      }
+    } on FirebaseAuthException catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(e.message ?? 'Failed to delete account')),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error: $e')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isDeletingAccount = false);
+    }
+  }
+
+  Future<void> _launchPrivacyPolicy() async {
+    const url = 'https://yourapp.com/privacy-policy';
+    if (!await launchUrl(Uri.parse(url))) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not open privacy policy')),
+        );
+      }
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      backgroundColor: Colors.grey[50],
       appBar: AppBar(
-        title: const Text('Settings'),
+        title: const Text(
+          'Settings',
+          style: TextStyle(
+            fontWeight: FontWeight.bold,
+            color: Colors.white,
+          ),
+        ),
         backgroundColor: AppColors.primary,
-        foregroundColor: Colors.white,
+        elevation: 0,
       ),
       body: ListView(
         padding: const EdgeInsets.all(16),
-        children: const [
-          Text('Settings coming soon'),
+        children: [
+          const Text(
+            'Account',
+            style: TextStyle(
+              fontSize: 18,
+              fontWeight: FontWeight.bold,
+              color: AppColors.textPrimary,
+            ),
+          ),
+          const SizedBox(height: 12),
+          Container(
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(14),
+            ),
+            child: Column(
+              children: [
+                ListTile(
+                  leading: const Icon(Icons.lock_outline_rounded, color: AppColors.primary),
+                  title: const Text('Change Password'),
+                  subtitle: const Text('Update your account password'),
+                  onTap: _showChangePasswordDialog,
+                ),
+                const Divider(height: 1),
+                ListTile(
+                  leading: const Icon(Icons.delete_forever_rounded, color: Colors.red),
+                  title: const Text('Delete Account'),
+                  subtitle: const Text('Permanently remove your account'),
+                  onTap: _deleteAccount,
+                  trailing: _isDeletingAccount
+                      ? const SizedBox(
+                          width: 20,
+                          height: 20,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : null,
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 24),
+          const Text(
+            'About',
+            style: TextStyle(
+              fontSize: 18,
+              fontWeight: FontWeight.bold,
+              color: AppColors.textPrimary,
+            ),
+          ),
+          const SizedBox(height: 12),
+          Container(
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(14),
+            ),
+            child: Column(
+              children: [
+                ListTile(
+                  leading: const Icon(Icons.info_outline_rounded, color: AppColors.primary),
+                  title: const Text('App Version'),
+                  subtitle: const Text('1.0.0'),
+                ),
+                const Divider(height: 1),
+                ListTile(
+                  leading: const Icon(Icons.description_rounded, color: AppColors.primary),
+                  title: const Text('Privacy Policy'),
+                  subtitle: const Text('View our privacy policy'),
+                  onTap: _launchPrivacyPolicy,
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showChangePasswordDialog() {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Text(
+          'Change Password',
+          style: TextStyle(fontWeight: FontWeight.w700),
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: _currentPasswordController,
+              obscureText: true,
+              decoration: const InputDecoration(
+                labelText: 'Current Password',
+                border: OutlineInputBorder(),
+              ),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: _newPasswordController,
+              obscureText: true,
+              decoration: const InputDecoration(
+                labelText: 'New Password',
+                border: OutlineInputBorder(),
+              ),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: _confirmPasswordController,
+              obscureText: true,
+              decoration: const InputDecoration(
+                labelText: 'Confirm New Password',
+                border: OutlineInputBorder(),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: _isChangingPassword ? null : () async {
+              await _changePassword();
+              if (mounted) Navigator.of(context).pop();
+            },
+            child: const Text('Update'),
+          ),
         ],
       ),
     );

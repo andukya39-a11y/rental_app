@@ -47,6 +47,10 @@ firebase.json
 # Release APK and AAB
 /app-release.apk
 /app-release.aab
+# Generated analysis files
+all_dart_files.txt
+# Kotlin build cache
+android/.kotlin/
 # Keystore files (if you store them in the project, otherwise remove)
 #/key.jks
 #/key.properties

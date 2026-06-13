@@ -1,35 +1,34 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
-import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:image_picker/image_picker.dart';
-import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:rental_app/models/house_model.dart';
 import 'package:rental_app/services/house_service.dart';
 import 'package:rental_app/constants/app_colors.dart';
 
-class AddHouseScreen extends StatefulWidget {
-  const AddHouseScreen({Key? key}) : super(key: key);
+class EditHouseScreen extends StatefulWidget {
+  final HouseModel house;
+
+  const EditHouseScreen({Key? key, required this.house}) : super(key: key);
 
   @override
-  State<AddHouseScreen> createState() => _AddHouseScreenState();
+  State<EditHouseScreen> createState() => _EditHouseScreenState();
 }
 
-class _AddHouseScreenState extends State<AddHouseScreen> {
+class _EditHouseScreenState extends State<EditHouseScreen> {
   final _formKey = GlobalKey<FormState>();
-  final _titleController = TextEditingController();
-  final _descriptionController = TextEditingController();
-  final _priceController = TextEditingController();
-  final _locationController = TextEditingController();
-  final _bedroomsController = TextEditingController();
-  final _bathroomsController = TextEditingController();
+  late final TextEditingController _titleController;
+  late final TextEditingController _descriptionController;
+  late final TextEditingController _priceController;
+  late final TextEditingController _locationController;
+  late final TextEditingController _bedroomsController;
+  late final TextEditingController _bathroomsController;
   bool _isLoading = false;
   bool _isAvailable = true;
   bool _isVerified = false;
   String? _selectedPropertyType;
   XFile? _imageFile;
-  double? _latitude;
-  double? _longitude;
+  String? _existingImageUrl;
 
   final List<String> _propertyTypes = [
     'Room',
@@ -38,6 +37,26 @@ class _AddHouseScreenState extends State<AddHouseScreen> {
     'Villa',
     'Studio',
   ];
+
+  @override
+  void initState() {
+    super.initState();
+    final house = widget.house;
+    _titleController = TextEditingController(text: house.title);
+    _descriptionController = TextEditingController(text: house.description);
+    _priceController = TextEditingController(text: house.price.toString());
+    _locationController = TextEditingController(text: house.location);
+    _bedroomsController = TextEditingController(
+      text: house.bedrooms.toString(),
+    );
+    _bathroomsController = TextEditingController(
+      text: house.bathrooms.toString(),
+    );
+    _isAvailable = house.isAvailable;
+    _isVerified = house.isVerified;
+    _selectedPropertyType = house.propertyType;
+    _existingImageUrl = house.imageUrl;
+  }
 
   @override
   void dispose() {
@@ -54,12 +73,18 @@ class _AddHouseScreenState extends State<AddHouseScreen> {
     final picker = ImagePicker();
     final pickedFile = await picker.pickImage(source: ImageSource.gallery);
     if (pickedFile != null) {
-      setState(() => _imageFile = pickedFile);
+      setState(() {
+        _imageFile = pickedFile;
+        _existingImageUrl = null;
+      });
     }
   }
 
   Future<void> _removeImage() async {
-    setState(() => _imageFile = null);
+    setState(() {
+      _imageFile = null;
+      _existingImageUrl = null;
+    });
   }
 
   Future<String?> _uploadImage(XFile imageFile) async {
@@ -89,24 +114,13 @@ class _AddHouseScreenState extends State<AddHouseScreen> {
 
     setState(() => _isLoading = true);
     try {
-      String? imageUrl;
+      String? imageUrl = _existingImageUrl;
       if (_imageFile != null) {
         imageUrl = await _uploadImage(_imageFile!);
         if (imageUrl == null && !mounted) return;
       }
 
-      final user = FirebaseAuth.instance.currentUser;
-      if (user == null) {
-        if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Please log in to add a house')),
-        );
-        return;
-      }
-
-      final house = HouseModel(
-        id: '',
-        userId: user.uid,
+      final updatedHouse = widget.house.copyWith(
         title: _titleController.text.trim(),
         description: _descriptionController.text.trim(),
         price: double.parse(_priceController.text),
@@ -114,36 +128,32 @@ class _AddHouseScreenState extends State<AddHouseScreen> {
         bedrooms: int.parse(_bedroomsController.text),
         bathrooms: int.parse(_bathroomsController.text),
         isAvailable: _isAvailable,
-        imageUrl: imageUrl,
         isVerified: _isVerified,
-        latitude: _latitude,
-        longitude: _longitude,
+        imageUrl: imageUrl,
         propertyType: _selectedPropertyType,
-        createdAt: DateTime.now(),
         updatedAt: DateTime.now(),
       );
 
-      await HouseService().addHouse(house);
+      await HouseService().updateHouse(updatedHouse);
       if (!mounted) return;
-
-      _formKey.currentState!.reset();
-      setState(() {
-        _isAvailable = true;
-        _isVerified = false;
-        _selectedPropertyType = null;
-        _imageFile = null;
-        _latitude = null;
-        _longitude = null;
-      });
 
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('House added successfully!')),
+        const SnackBar(
+          content: Text('Listing updated successfully!'),
+          backgroundColor: Colors.green,
+          behavior: SnackBarBehavior.floating,
+        ),
       );
+      Navigator.of(context).pop(true);
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('Error adding house: $e')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Error updating listing: $e'),
+          backgroundColor: Colors.red,
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
@@ -155,7 +165,7 @@ class _AddHouseScreenState extends State<AddHouseScreen> {
       backgroundColor: Colors.grey[50],
       appBar: AppBar(
         title: const Text(
-          'Add New Listing',
+          'Edit Listing',
           style: TextStyle(fontWeight: FontWeight.bold, color: Colors.white),
         ),
         backgroundColor: AppColors.primary,
@@ -174,7 +184,7 @@ class _AddHouseScreenState extends State<AddHouseScreen> {
               _buildSectionHeader(
                 icon: Icons.edit_note_rounded,
                 title: 'Basic Information',
-                subtitle: 'Tell us about your property',
+                subtitle: 'Update your property details',
               ),
               const SizedBox(height: 16),
               _buildTextFormField(
@@ -199,7 +209,7 @@ class _AddHouseScreenState extends State<AddHouseScreen> {
               _buildSectionHeader(
                 icon: Icons.attach_money_rounded,
                 title: 'Pricing & Location',
-                subtitle: 'Set your rental details',
+                subtitle: 'Update your rental details',
               ),
               const SizedBox(height: 16),
               Row(
@@ -277,8 +287,6 @@ class _AddHouseScreenState extends State<AddHouseScreen> {
                 ],
               ),
               const SizedBox(height: 24),
-              _buildLocationPickerSection(),
-              const SizedBox(height: 24),
               _buildTogglesSection(),
               const SizedBox(height: 32),
               _buildSubmitButton(),
@@ -291,23 +299,41 @@ class _AddHouseScreenState extends State<AddHouseScreen> {
   }
 
   Widget _buildImageSection() {
+    final hasImage = _imageFile != null || _existingImageUrl != null;
+
     return Container(
       height: 220,
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(20),
         border: Border.all(
-          color: _imageFile != null
+          color: hasImage
               ? AppColors.primary.withValues(alpha: 0.3)
               : Colors.grey.withValues(alpha: 0.2),
-          width: _imageFile != null ? 2 : 1,
+          width: hasImage ? 2 : 1,
         ),
       ),
       clipBehavior: Clip.antiAlias,
-      child: _imageFile != null
+      child: hasImage
           ? Stack(
               fit: StackFit.expand,
               children: [
-                Image.file(File(_imageFile!.path), fit: BoxFit.cover),
+                _imageFile != null
+                    ? Image.file(File(_imageFile!.path), fit: BoxFit.cover)
+                    : Image.network(
+                        _existingImageUrl!,
+                        fit: BoxFit.cover,
+                        loadingBuilder: (context, child, progress) {
+                          if (progress == null) return child;
+                          return Center(
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              color: AppColors.primary,
+                            ),
+                          );
+                        },
+                        errorBuilder: (context, error, stackTrace) =>
+                            _buildPlaceholderImage(),
+                      ),
                 Positioned(
                   top: 12,
                   right: 12,
@@ -405,6 +431,24 @@ class _AddHouseScreenState extends State<AddHouseScreen> {
                 ),
               ),
             ),
+    );
+  }
+
+  Widget _buildPlaceholderImage() {
+    return Container(
+      height: 220,
+      color: Colors.grey[100],
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(Icons.broken_image_rounded, size: 48, color: Colors.grey[400]),
+          const SizedBox(height: 8),
+          Text(
+            'Could not load image',
+            style: TextStyle(fontSize: 13, color: Colors.grey[500]),
+          ),
+        ],
+      ),
     );
   }
 
@@ -547,179 +591,6 @@ class _AddHouseScreenState extends State<AddHouseScreen> {
     );
   }
 
-  Future<void> _openLocationPicker() async {
-    final result = await Navigator.of(context).push<Map<String, double>>(
-      MaterialPageRoute(
-        builder: (_) => _LocationPickerScreen(
-          initialLatitude: _latitude,
-          initialLongitude: _longitude,
-        ),
-      ),
-    );
-    if (result != null) {
-      setState(() {
-        _latitude = result['latitude'];
-        _longitude = result['longitude'];
-      });
-    }
-  }
-
-  Widget _buildLocationPickerSection() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        _buildSectionHeader(
-          icon: Icons.map_rounded,
-          title: 'Map Location',
-          subtitle: 'Pin the exact location on the map',
-        ),
-        const SizedBox(height: 12),
-        InkWell(
-          onTap: _openLocationPicker,
-          borderRadius: BorderRadius.circular(16),
-          child: Container(
-            height: 180,
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(16),
-              border: Border.all(
-                color: _latitude != null
-                    ? AppColors.primary.withValues(alpha: 0.3)
-                    : Colors.grey.withValues(alpha: 0.2),
-                width: _latitude != null ? 2 : 1,
-              ),
-            ),
-            clipBehavior: Clip.antiAlias,
-            child: _latitude != null && _longitude != null
-                ? Stack(
-                    fit: StackFit.expand,
-                    children: [
-                      GoogleMap(
-                        initialCameraPosition: CameraPosition(
-                          target: LatLng(_latitude!, _longitude!),
-                          zoom: 15,
-                        ),
-                        markers: {
-                          Marker(
-                            markerId: const MarkerId('selected_location'),
-                            position: LatLng(_latitude!, _longitude!),
-                          ),
-                        },
-                        zoomGesturesEnabled: false,
-                        scrollGesturesEnabled: false,
-                        tiltGesturesEnabled: false,
-                        rotateGesturesEnabled: false,
-                      ),
-                      Positioned(
-                        top: 8,
-                        right: 8,
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 8,
-                            vertical: 4,
-                          ),
-                          decoration: BoxDecoration(
-                            color: AppColors.primary,
-                            borderRadius: BorderRadius.circular(8),
-                          ),
-                          child: const Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Icon(
-                                Icons.check_rounded,
-                                size: 14,
-                                color: Colors.white,
-                              ),
-                              SizedBox(width: 4),
-                              Text(
-                                'Location set',
-                                style: TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 11,
-                                  fontWeight: FontWeight.w600,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-                      Positioned(
-                        bottom: 8,
-                        left: 8,
-                        right: 8,
-                        child: Text(
-                          'Tap to change location',
-                          textAlign: TextAlign.center,
-                          style: TextStyle(
-                            color: Colors.white,
-                            fontSize: 12,
-                            fontWeight: FontWeight.w500,
-                            shadows: [
-                              Shadow(
-                                color: Colors.black.withValues(alpha: 0.5),
-                                blurRadius: 4,
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-                    ],
-                  )
-                : Center(
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Icon(
-                          Icons.add_location_alt_rounded,
-                          size: 40,
-                          color: AppColors.primary.withValues(alpha: 0.6),
-                        ),
-                        const SizedBox(height: 8),
-                        Text(
-                          'Tap to set location',
-                          style: TextStyle(
-                            fontSize: 15,
-                            fontWeight: FontWeight.w600,
-                            color: AppColors.textPrimary,
-                          ),
-                        ),
-                        const SizedBox(height: 4),
-                        Text(
-                          'Pin the exact property location',
-                          style: TextStyle(
-                            fontSize: 12,
-                            color: AppColors.textSecondary,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-          ),
-        ),
-        if (_latitude != null && _longitude != null)
-          Padding(
-            padding: const EdgeInsets.only(top: 8),
-            child: Row(
-              children: [
-                Icon(
-                  Icons.location_on_rounded,
-                  size: 14,
-                  color: AppColors.primary,
-                ),
-                const SizedBox(width: 6),
-                Text(
-                  '${_latitude!.toStringAsFixed(6)}, ${_longitude!.toStringAsFixed(6)}',
-                  style: TextStyle(
-                    fontSize: 12,
-                    color: AppColors.textSecondary,
-                  ),
-                ),
-              ],
-            ),
-          ),
-      ],
-    );
-  }
-
   Widget _buildTogglesSection() {
     return Container(
       decoration: BoxDecoration(
@@ -816,176 +687,9 @@ class _AddHouseScreenState extends State<AddHouseScreen> {
                 ),
               )
             : const Text(
-                'Publish Listing',
+                'Save Changes',
                 style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
               ),
-      ),
-    );
-  }
-}
-
-class _LocationPickerScreen extends StatefulWidget {
-  final double? initialLatitude;
-  final double? initialLongitude;
-
-  const _LocationPickerScreen({this.initialLatitude, this.initialLongitude});
-
-  @override
-  State<_LocationPickerScreen> createState() => _LocationPickerScreenState();
-}
-
-class _LocationPickerScreenState extends State<_LocationPickerScreen> {
-  LatLng _selectedLocation = const LatLng(-6.1650, 39.2023);
-
-  @override
-  void initState() {
-    super.initState();
-    if (widget.initialLatitude != null && widget.initialLongitude != null) {
-      _selectedLocation = LatLng(
-        widget.initialLatitude!,
-        widget.initialLongitude!,
-      );
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text(
-          'Select Location',
-          style: TextStyle(fontWeight: FontWeight.bold, color: Colors.white),
-        ),
-        backgroundColor: AppColors.primary,
-        foregroundColor: Colors.white,
-        elevation: 0,
-        actions: [
-          TextButton(
-            onPressed: () {
-              Navigator.of(context).pop({
-                'latitude': _selectedLocation.latitude,
-                'longitude': _selectedLocation.longitude,
-              });
-            },
-            child: const Text(
-              'Confirm',
-              style: TextStyle(
-                color: Colors.white,
-                fontWeight: FontWeight.w600,
-                fontSize: 15,
-              ),
-            ),
-          ),
-        ],
-      ),
-      body: Column(
-        children: [
-          Expanded(
-            child: GoogleMap(
-              onMapCreated: (controller) {},
-              initialCameraPosition: CameraPosition(
-                target: _selectedLocation,
-                zoom: 14,
-              ),
-              onTap: (latLng) {
-                setState(() => _selectedLocation = latLng);
-              },
-              markers: {
-                Marker(
-                  markerId: const MarkerId('selected'),
-                  position: _selectedLocation,
-                  draggable: true,
-                  onDragEnd: (latLng) {
-                    setState(() => _selectedLocation = latLng);
-                  },
-                ),
-              },
-              myLocationEnabled: true,
-              myLocationButtonEnabled: true,
-            ),
-          ),
-          Container(
-            padding: const EdgeInsets.fromLTRB(20, 16, 20, 32),
-            decoration: BoxDecoration(
-              color: Colors.white,
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withValues(alpha: 0.05),
-                  blurRadius: 12,
-                  offset: const Offset(0, -3),
-                ),
-              ],
-            ),
-            child: SafeArea(
-              top: false,
-              child: Row(
-                children: [
-                  Container(
-                    width: 44,
-                    height: 44,
-                    decoration: BoxDecoration(
-                      color: AppColors.primary.withValues(alpha: 0.1),
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: Icon(
-                      Icons.location_on_rounded,
-                      color: AppColors.primary,
-                      size: 22,
-                    ),
-                  ),
-                  const SizedBox(width: 14),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const Text(
-                          'Selected Location',
-                          style: TextStyle(
-                            fontSize: 12,
-                            fontWeight: FontWeight.w500,
-                            color: AppColors.textSecondary,
-                          ),
-                        ),
-                        const SizedBox(height: 2),
-                        Text(
-                          '${_selectedLocation.latitude.toStringAsFixed(6)}, ${_selectedLocation.longitude.toStringAsFixed(6)}',
-                          style: const TextStyle(
-                            fontSize: 14,
-                            fontWeight: FontWeight.w600,
-                            color: AppColors.textPrimary,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  SizedBox(
-                    height: 44,
-                    child: ElevatedButton(
-                      onPressed: () {
-                        Navigator.of(context).pop({
-                          'latitude': _selectedLocation.latitude,
-                          'longitude': _selectedLocation.longitude,
-                        });
-                      },
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: AppColors.primary,
-                        foregroundColor: Colors.white,
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                      ),
-                      child: const Text(
-                        'Confirm',
-                        style: TextStyle(fontWeight: FontWeight.w600),
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ],
       ),
     );
   }

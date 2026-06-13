@@ -2,12 +2,18 @@ import 'package:flutter/material.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:share_plus/share_plus.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:rental_app/models/house_model.dart';
+import 'package:rental_app/models/review_model.dart';
 import 'package:rental_app/services/house_service.dart';
+import 'package:rental_app/services/review_service.dart';
 import 'package:rental_app/services/recently_viewed_service.dart';
 import 'package:rental_app/widgets/verification_badge.dart';
 import 'package:rental_app/screens/booking_request_dialog.dart';
+import 'package:rental_app/screens/edit_house_screen.dart';
+import 'package:rental_app/screens/house_list_screen.dart';
+import 'package:rental_app/screens/reviews_screen.dart';
 import 'package:rental_app/constants/app_colors.dart';
 
 class HouseDetailScreen extends StatefulWidget {
@@ -75,7 +81,8 @@ class _HouseDetailScreenState extends State<HouseDetailScreen> {
 
   Future<void> _goToCurrentLocation() async {
     if (_currentPosition == null) return;
-    final latLng = LatLng(_currentPosition!.latitude, _currentPosition!.longitude);
+    final latLng =
+        LatLng(_currentPosition!.latitude, _currentPosition!.longitude);
     _mapController?.animateCamera(CameraUpdate.newLatLng(latLng));
     setState(() {
       _markers.removeWhere((m) => m.markerId.value == 'current_location');
@@ -136,6 +143,57 @@ class _HouseDetailScreenState extends State<HouseDetailScreen> {
     return user != null && user.uid == widget.house.userId;
   }
 
+  Future<void> _shareHouse() async {
+    final house = widget.house;
+    final priceFormatted = _formatPrice(house.price);
+    final shareText = '''
+Check out this rental: ${house.title}
+📍 Location: ${house.location}
+💰 Price: $priceFormatted
+${house.description.isNotEmpty ? '\n${house.description}' : ''}
+''';
+    await Share.share(shareText.trim(), subject: 'Rental: ${house.title}');
+  }
+
+  Future<void> _contactLandlord() async {
+    final house = widget.house;
+    final name = house.landlordName ?? 'the landlord';
+    final email = house.landlordEmail;
+
+    if (email != null && email.isNotEmpty) {
+      final uri = Uri(
+        scheme: 'mailto',
+        path: email,
+        queryParameters: {
+          'subject': 'Inquiry about ${house.title}',
+          'body':
+              'Hello $name,\n\nI am interested in the property: ${house.title} located at ${house.location}.\n\nPlease let me know more details.\n\nThank you.',
+        },
+      );
+      if (await canLaunchUrl(uri)) {
+        await launchUrl(uri);
+      } else {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+                'Could not open email client. Please contact the landlord directly.'),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+    } else {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content:
+              Text('Contact information is not available for this property.'),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    }
+  }
+
   String _formatPrice(double price) {
     if (price >= 1000000) {
       return 'TSh ${(price / 1000000).toStringAsFixed(1)}M/mo';
@@ -164,7 +222,7 @@ class _HouseDetailScreenState extends State<HouseDetailScreen> {
           IconButton(
             icon: const Icon(Icons.share_outlined),
             tooltip: 'Share',
-            onPressed: () {},
+            onPressed: _shareHouse,
           ),
         ],
       ),
@@ -179,26 +237,28 @@ class _HouseDetailScreenState extends State<HouseDetailScreen> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   const SizedBox(height: 4),
-                  _buildTitleAndPrice(),
-                  const SizedBox(height: 12),
-                  _buildPropertyTypeChip(),
-                  const SizedBox(height: 16),
-                  _buildVerificationAndStatusRow(),
-                  const SizedBox(height: 20),
-                  const Divider(height: 1),
-                  const SizedBox(height: 20),
-                  _buildPropertyDetailsGrid(),
-                  const SizedBox(height: 24),
-                  _buildOwnerInfoCard(),
-                  const SizedBox(height: 24),
-                  _buildLocationSection(),
-                  const SizedBox(height: 24),
-                  _buildDescriptionSection(),
-                  const SizedBox(height: 24),
-                  _buildActionButtons(),
-                  const SizedBox(height: 24),
-                  _buildSimilarHousesPlaceholder(),
-                  const SizedBox(height: 100),
+_buildTitleAndPrice(),
+                    const SizedBox(height: 12),
+                    _buildPropertyTypeChip(),
+                    const SizedBox(height: 16),
+                    _buildVerificationAndStatusRow(),
+                    const SizedBox(height: 20),
+                    const Divider(height: 1),
+                    const SizedBox(height: 20),
+                    _buildPropertyDetailsGrid(),
+                    const SizedBox(height: 24),
+                    _buildOwnerInfoCard(),
+                    const SizedBox(height: 24),
+                    _buildLocationSection(),
+                    const SizedBox(height: 24),
+                    _buildDescriptionSection(),
+                    const SizedBox(height: 24),
+                    _buildReviewsSection(),
+                    const SizedBox(height: 24),
+                    _buildActionButtons(),
+                    const SizedBox(height: 24),
+                    _buildSimilarHousesSection(),
+                    const SizedBox(height: 100),
                 ],
               ),
             ),
@@ -389,9 +449,13 @@ class _HouseDetailScreenState extends State<HouseDetailScreen> {
         const SizedBox(height: 14),
         Row(
           children: [
-            Expanded(child: _buildDetailChip(Icons.bed_rounded, '${widget.house.bedrooms} Bedrooms')),
+            Expanded(
+                child: _buildDetailChip(
+                    Icons.bed_rounded, '${widget.house.bedrooms} Bedrooms')),
             const SizedBox(width: 12),
-            Expanded(child: _buildDetailChip(Icons.bathtub_rounded, '${widget.house.bathrooms} Bathrooms')),
+            Expanded(
+                child: _buildDetailChip(Icons.bathtub_rounded,
+                    '${widget.house.bathrooms} Bathrooms')),
           ],
         ),
       ],
@@ -447,7 +511,8 @@ class _HouseDetailScreenState extends State<HouseDetailScreen> {
               color: AppColors.primary.withValues(alpha: 0.1),
               shape: BoxShape.circle,
             ),
-            child: Icon(Icons.person_rounded, color: AppColors.primary, size: 22),
+            child:
+                Icon(Icons.person_rounded, color: AppColors.primary, size: 22),
           ),
           const SizedBox(width: 14),
           Expanded(
@@ -476,7 +541,7 @@ class _HouseDetailScreenState extends State<HouseDetailScreen> {
           IconButton(
             icon: const Icon(Icons.phone_rounded, color: AppColors.primary),
             tooltip: 'Contact',
-            onPressed: () {},
+            onPressed: _contactLandlord,
           ),
         ],
       ),
@@ -527,7 +592,8 @@ class _HouseDetailScreenState extends State<HouseDetailScreen> {
                 label: const Text('My Location'),
                 style: OutlinedButton.styleFrom(
                   foregroundColor: AppColors.primary,
-                  side: BorderSide(color: AppColors.primary.withValues(alpha: 0.4)),
+                  side: BorderSide(
+                      color: AppColors.primary.withValues(alpha: 0.4)),
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(12),
                   ),
@@ -582,6 +648,242 @@ class _HouseDetailScreenState extends State<HouseDetailScreen> {
     );
   }
 
+  Widget _buildReviewsSection() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            const Text(
+              'Reviews',
+              style: TextStyle(
+                fontSize: 17,
+                fontWeight: FontWeight.bold,
+                color: AppColors.textPrimary,
+              ),
+            ),
+            TextButton(
+              onPressed: () {
+                Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder: (_) => ReviewsScreen(
+                      houseId: widget.house.id,
+                      houseTitle: widget.house.title,
+                      reviewsStream: ReviewService().getReviewsByHouse(widget.house.id),
+                      averageRating: ReviewService().getAverageRating(widget.house.id),
+                      reviewCount: ReviewService().getReviewCount(widget.house.id),
+                    ),
+                  ),
+                );
+              },
+              child: const Text(
+                'See all',
+                style: TextStyle(
+                  color: AppColors.primary,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 12),
+        FutureBuilder<double>(
+          future: ReviewService().getAverageRating(widget.house.id),
+          builder: (context, ratingSnapshot) {
+            final avgRating = ratingSnapshot.data ?? 0.0;
+            return FutureBuilder<int>(
+              future: ReviewService().getReviewCount(widget.house.id),
+              builder: (context, countSnapshot) {
+                final count = countSnapshot.data ?? 0;
+                return StreamBuilder<List<ReviewModel>>(
+                  stream: ReviewService().getReviewsByHouse(widget.house.id),
+                  builder: (context, reviewSnapshot) {
+                    if (reviewSnapshot.connectionState == ConnectionState.waiting) {
+                      return _buildReviewsLoading();
+                    }
+                    if (!reviewSnapshot.hasData || reviewSnapshot.data!.isEmpty) {
+                      return _buildNoReviews();
+                    }
+                    final reviews = reviewSnapshot.data!;
+                    final displayReviews = reviews.take(3).toList();
+                    return Column(
+                      children: [
+                        Row(
+                          children: [
+                            Text(
+                              avgRating.toStringAsFixed(1),
+                              style: const TextStyle(
+                                fontSize: 24,
+                                fontWeight: FontWeight.bold,
+                                color: AppColors.textPrimary,
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            Row(
+                              children: List.generate(5, (index) {
+                                return Icon(
+                                  index < avgRating.round()
+                                      ? Icons.star_rounded
+                                      : Icons.star_border_rounded,
+                                  size: 20,
+                                  color: Colors.amber,
+                                );
+                              }),
+                            ),
+                            const SizedBox(width: 12),
+                            Text(
+                              '$count reviews',
+                              style: TextStyle(
+                                fontSize: 14,
+                                color: AppColors.textSecondary,
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 16),
+                        ...displayReviews.map((review) => _buildReviewItem(review)),
+                      ],
+                    );
+                  },
+                );
+              },
+            );
+          },
+        ),
+      ],
+    );
+  }
+
+  Widget _buildReviewsLoading() {
+    return const Row(
+      children: [
+        Text('4.5'),
+        SizedBox(width: 8),
+        Row(
+          children: [
+            Icon(Icons.star_rounded, size: 20, color: Colors.amber),
+            Icon(Icons.star_rounded, size: 20, color: Colors.amber),
+            Icon(Icons.star_rounded, size: 20, color: Colors.amber),
+            Icon(Icons.star_rounded, size: 20, color: Colors.amber),
+            Icon(Icons.star_rounded, size: 20, color: Colors.amber),
+          ],
+        ),
+        SizedBox(width: 12),
+        Text('Loading...'),
+      ],
+    );
+  }
+
+  Widget _buildNoReviews() {
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: Colors.grey.withValues(alpha: 0.1)),
+      ),
+      child: const Column(
+        children: [
+          Icon(Icons.star_border_rounded, size: 48, color: AppColors.textSecondary),
+          SizedBox(height: 12),
+          Text(
+            'No reviews yet',
+            style: TextStyle(
+              fontSize: 16,
+              fontWeight: FontWeight.w600,
+              color: AppColors.textPrimary,
+            ),
+          ),
+          SizedBox(height: 4),
+          Text(
+            'Be the first to review this property',
+            style: TextStyle(
+              fontSize: 14,
+              color: AppColors.textSecondary,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildReviewItem(ReviewModel review) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: Colors.grey.withValues(alpha: 0.1)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              CircleAvatar(
+                radius: 16,
+                backgroundImage:
+                    review.userPhotoUrl != null ? NetworkImage(review.userPhotoUrl!) : null,
+                backgroundColor: AppColors.primary.withValues(alpha: 0.1),
+                child: review.userPhotoUrl == null
+                    ? Icon(Icons.person_rounded, size: 18, color: AppColors.primary)
+                    : null,
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      review.userName,
+                      style: const TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                        color: AppColors.textPrimary,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      '${review.createdAt.day}/${review.createdAt.month}/${review.createdAt.year}',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: AppColors.textSecondary.withValues(alpha: 0.7),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Row(
+                children: List.generate(5, (index) {
+                  return Icon(
+                    index < review.rating.round()
+                        ? Icons.star_rounded
+                        : Icons.star_border_rounded,
+                    size: 16,
+                    color: Colors.amber,
+                  );
+                }),
+              ),
+            ],
+          ),
+          if (review.comment != null && review.comment!.isNotEmpty) ...[
+            const SizedBox(height: 10),
+            Text(
+              review.comment!,
+              style: TextStyle(
+                fontSize: 14,
+                color: AppColors.textPrimary,
+                height: 1.4,
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
   Widget _buildActionButtons() {
     return Column(
       children: [
@@ -613,7 +915,37 @@ class _HouseDetailScreenState extends State<HouseDetailScreen> {
           SizedBox(
             width: double.infinity,
             child: ElevatedButton.icon(
-              onPressed: _isRequestingVerification ? null : _requestShehaVerification,
+              onPressed: () {
+                Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder: (_) => EditHouseScreen(house: widget.house),
+                  ),
+                );
+              },
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppColors.primary,
+                foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(vertical: 15),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(14),
+                ),
+              ),
+              icon: const Icon(Icons.edit_rounded, size: 20),
+              label: const Text(
+                'Edit Listing',
+                style: TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(height: 12),
+          SizedBox(
+            width: double.infinity,
+            child: ElevatedButton.icon(
+              onPressed:
+                  _isRequestingVerification ? null : _requestShehaVerification,
               style: ElevatedButton.styleFrom(
                 backgroundColor: AppColors.primary,
                 foregroundColor: Colors.white,
@@ -633,7 +965,9 @@ class _HouseDetailScreenState extends State<HouseDetailScreen> {
                     )
                   : const Icon(Icons.verified_user_rounded, size: 20),
               label: Text(
-                _isRequestingVerification ? 'Submitting...' : 'Request Sheha Verification',
+                _isRequestingVerification
+                    ? 'Submitting...'
+                    : 'Request Sheha Verification',
                 style: const TextStyle(
                   fontSize: 16,
                   fontWeight: FontWeight.w600,
@@ -646,7 +980,178 @@ class _HouseDetailScreenState extends State<HouseDetailScreen> {
     );
   }
 
-  Widget _buildSimilarHousesPlaceholder() {
+  Widget _buildSimilarHousesSection() {
+    final house = widget.house;
+    return FutureBuilder<List<HouseModel>>(
+      future: HouseService().getHouses(
+        locationFilter: house.location,
+        minPrice: house.price * 0.7,
+        maxPrice: house.price * 1.3,
+      ),
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return _buildSimilarHousesLoading();
+        }
+
+        if (snapshot.hasError || !snapshot.hasData) {
+          return const SizedBox.shrink();
+        }
+
+        var similarHouses =
+            snapshot.data!.where((h) => h.id != house.id).take(6).toList();
+
+        if (similarHouses.isEmpty) {
+          return const SizedBox.shrink();
+        }
+
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                const Text(
+                  'Similar Houses',
+                  style: TextStyle(
+                    fontSize: 17,
+                    fontWeight: FontWeight.bold,
+                    color: AppColors.textPrimary,
+                  ),
+                ),
+                TextButton(
+                  onPressed: () {
+                    Navigator.of(context).push(
+                      MaterialPageRoute(
+                        builder: (_) => HouseListScreen(),
+                      ),
+                    );
+                  },
+                  child: const Text(
+                    'See all',
+                    style: TextStyle(
+                      color: AppColors.primary,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            SizedBox(
+              height: 180,
+              child: ListView.builder(
+                scrollDirection: Axis.horizontal,
+                itemCount: similarHouses.length,
+                itemBuilder: (context, index) {
+                  final similarHouse = similarHouses[index];
+                  return Padding(
+                    padding: EdgeInsets.only(
+                      right: index < similarHouses.length - 1 ? 12 : 0,
+                    ),
+                    child: GestureDetector(
+                      onTap: () {
+                        Navigator.of(context).push(
+                          MaterialPageRoute(
+                            builder: (_) =>
+                                HouseDetailScreen(house: similarHouse),
+                          ),
+                        );
+                      },
+                      child: Container(
+                        width: 150,
+                        decoration: BoxDecoration(
+                          color: Colors.white,
+                          borderRadius: BorderRadius.circular(16),
+                          boxShadow: [
+                            BoxShadow(
+                              color: Colors.black.withValues(alpha: 0.04),
+                              blurRadius: 8,
+                              offset: const Offset(0, 2),
+                            ),
+                          ],
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            ClipRRect(
+                              borderRadius: const BorderRadius.vertical(
+                                top: Radius.circular(16),
+                              ),
+                              child: similarHouse.imageUrl != null &&
+                                      similarHouse.imageUrl!.isNotEmpty
+                                  ? Image.network(
+                                      similarHouse.imageUrl!,
+                                      height: 100,
+                                      width: double.infinity,
+                                      fit: BoxFit.cover,
+                                      errorBuilder:
+                                          (context, error, stackTrace) =>
+                                              _buildSimilarHousePlaceholder(),
+                                    )
+                                  : _buildSimilarHousePlaceholder(),
+                            ),
+                            Padding(
+                              padding: const EdgeInsets.all(10),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    similarHouse.title,
+                                    style: const TextStyle(
+                                      fontSize: 13,
+                                      fontWeight: FontWeight.w600,
+                                      color: AppColors.textPrimary,
+                                    ),
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                  const SizedBox(height: 4),
+                                  Row(
+                                    children: [
+                                      Icon(Icons.location_on_rounded,
+                                          size: 12,
+                                          color: AppColors.textSecondary),
+                                      const SizedBox(width: 2),
+                                      Expanded(
+                                        child: Text(
+                                          similarHouse.location,
+                                          style: TextStyle(
+                                            fontSize: 11,
+                                            color: AppColors.textSecondary,
+                                          ),
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                  const SizedBox(height: 4),
+                                  Text(
+                                    'TSh ${(similarHouse.price / 1000).toStringAsFixed(0)}K/mo',
+                                    style: const TextStyle(
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.w700,
+                                      color: AppColors.primary,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  );
+                },
+              ),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  Widget _buildSimilarHousesLoading() {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -661,13 +1166,17 @@ class _HouseDetailScreenState extends State<HouseDetailScreen> {
                 color: AppColors.textPrimary,
               ),
             ),
-            TextButton(
-              onPressed: () {},
-              child: const Text(
-                'See all',
-                style: TextStyle(
-                  color: AppColors.primary,
-                  fontWeight: FontWeight.w600,
+            const SizedBox(
+              width: 60,
+              height: 24,
+              child: Center(
+                child: SizedBox(
+                  width: 14,
+                  height: 14,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 1.5,
+                    color: AppColors.primary,
+                  ),
                 ),
               ),
             ),
@@ -678,40 +1187,29 @@ class _HouseDetailScreenState extends State<HouseDetailScreen> {
           height: 180,
           child: ListView.builder(
             scrollDirection: Axis.horizontal,
-            itemCount: 4,
+            itemCount: 3,
             itemBuilder: (context, index) => Container(
               width: 150,
-              margin: EdgeInsets.only(right: index < 3 ? 12 : 0),
+              margin: EdgeInsets.only(right: index < 2 ? 12 : 0),
               decoration: BoxDecoration(
-                color: Colors.grey[100],
+                color: Colors.white,
                 borderRadius: BorderRadius.circular(16),
               ),
               child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Expanded(
-                    child: Container(
-                      decoration: BoxDecoration(
-                        color: Colors.grey[200],
-                        borderRadius: const BorderRadius.vertical(
-                          top: Radius.circular(16),
-                        ),
-                      ),
-                      child: Icon(
-                        Icons.house_rounded,
-                        size: 40,
-                        color: Colors.grey[400],
+                  Container(
+                    height: 100,
+                    width: double.infinity,
+                    decoration: BoxDecoration(
+                      color: Colors.grey[200],
+                      borderRadius: const BorderRadius.vertical(
+                        top: Radius.circular(16),
                       ),
                     ),
                   ),
-                  Container(
+                  Padding(
                     padding: const EdgeInsets.all(10),
-                    width: double.infinity,
-                    decoration: const BoxDecoration(
-                      color: Colors.white,
-                      borderRadius: BorderRadius.vertical(
-                        bottom: Radius.circular(16),
-                      ),
-                    ),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
@@ -719,7 +1217,7 @@ class _HouseDetailScreenState extends State<HouseDetailScreen> {
                           height: 12,
                           width: 100,
                           decoration: BoxDecoration(
-                            color: Colors.grey[300],
+                            color: Colors.grey[200],
                             borderRadius: BorderRadius.circular(4),
                           ),
                         ),
@@ -741,6 +1239,22 @@ class _HouseDetailScreenState extends State<HouseDetailScreen> {
           ),
         ),
       ],
+    );
+  }
+
+  Widget _buildSimilarHousePlaceholder() {
+    return Container(
+      height: 100,
+      width: double.infinity,
+      decoration: BoxDecoration(
+        color: Colors.grey[100],
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      child: Icon(
+        Icons.house_rounded,
+        size: 36,
+        color: Colors.grey[400],
+      ),
     );
   }
 }

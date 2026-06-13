@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:google_sign_in/google_sign_in.dart';
 import 'package:rental_app/constants/app_colors.dart';
+import 'package:rental_app/screens/forgot_password_screen.dart';
 
 class AuthScreen extends StatefulWidget {
   const AuthScreen({Key? key}) : super(key: key);
@@ -43,10 +45,14 @@ class _AuthScreenState extends State<AuthScreen> {
           password: _passwordController.text,
         );
       } else {
-        await FirebaseAuth.instance.createUserWithEmailAndPassword(
+        final userCredential = await FirebaseAuth.instance.createUserWithEmailAndPassword(
           email: _emailController.text.trim(),
           password: _passwordController.text,
         );
+        if (userCredential.user != null) {
+          await userCredential.user!.sendEmailVerification();
+          _showSnackBar('Verification email sent! Please check your inbox.');
+        }
       }
     } on FirebaseAuthException catch (e) {
       if (!mounted) return;
@@ -61,11 +67,62 @@ class _AuthScreenState extends State<AuthScreen> {
         message = 'No user found for that email.';
       } else if (e.code == 'wrong-password') {
         message = 'Wrong password provided for that user.';
+      } else if (e.code == 'user-disabled') {
+        message = 'This user account has been disabled.';
       } else {
         message = e.message ?? 'Firebase error: ${e.code}';
       }
       setState(() => _inlineError = message);
       _showSnackBar(message);
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _inlineError = 'Unexpected error: ${e.toString()}');
+      _showSnackBar('Unexpected error occurred');
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
+    }
+  }
+
+  Future<void> _signInWithGoogle() async {
+    setState(() => _isLoading = true);
+
+    try {
+      final GoogleSignInAccount? googleUser = await GoogleSignIn().signIn();
+      if (googleUser == null) {
+        setState(() => _isLoading = false);
+        return;
+      }
+
+      final GoogleSignInAuthentication googleAuth = await googleUser.authentication;
+      final credential = GoogleAuthProvider.credential(
+        accessToken: googleAuth.accessToken,
+        idToken: googleAuth.idToken,
+      );
+
+      final userCredential = await FirebaseAuth.instance.signInWithCredential(credential);
+      
+      if (userCredential.user != null && !userCredential.user!.emailVerified) {
+        await userCredential.user!.sendEmailVerification();
+        _showSnackBar('Verification email sent! Please check your inbox.');
+      }
+    } on FirebaseAuthException catch (e) {
+      if (!mounted) return;
+      String message = 'Google sign-in failed';
+      if (e.code == 'account-exists-with-different-credential') {
+        message = 'An account already exists with a different credential.';
+      } else if (e.code == 'invalid-credential') {
+        message = 'Invalid Google credentials.';
+      } else if (e.code == 'operation-not-allowed') {
+        message = 'Google sign-in is not enabled. Please contact support.';
+      } else {
+        message = e.message ?? 'Google sign-in error: ${e.code}';
+      }
+      setState(() => _inlineError = message);
+      _showSnackBar(message);
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _inlineError = 'Google sign-in error: ${e.toString()}');
+      _showSnackBar('Google sign-in failed');
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
@@ -116,19 +173,22 @@ class _AuthScreenState extends State<AuthScreen> {
                       const SizedBox(height: 24),
                       _buildHeader(isSmallScreen),
                       const SizedBox(height: 32),
-
                       if (_inlineError != null) _buildInlineError(),
-
                       _buildEmailField(isSmallScreen),
                       const SizedBox(height: 16),
                       _buildPasswordField(isSmallScreen),
                       const SizedBox(height: 8),
-
-                      if (!_isLogin)
+                      if (_isLogin)
                         Align(
                           alignment: Alignment.centerRight,
                           child: TextButton(
-                            onPressed: () {},
+                            onPressed: () {
+                              Navigator.of(context).push(
+                                MaterialPageRoute(
+                                  builder: (_) => const ForgotPasswordScreen(),
+                                ),
+                              );
+                            },
                             child: const Text(
                               'Forgot Password?',
                               style: TextStyle(fontSize: 14),
@@ -137,7 +197,6 @@ class _AuthScreenState extends State<AuthScreen> {
                         )
                       else
                         const SizedBox(height: 8),
-
                       const SizedBox(height: 24),
                       _buildSubmitButton(isSmallScreen),
                       const SizedBox(height: 16),
@@ -261,8 +320,10 @@ class _AuthScreenState extends State<AuthScreen> {
       decoration: InputDecoration(
         labelText: 'Email',
         prefixIcon: const Icon(Icons.email_outlined),
-        suffixIcon: _emailController.text.isNotEmpty && _emailController.text.contains('@')
-            ? const Icon(Icons.check_circle_rounded, color: Colors.green, size: 20)
+        suffixIcon: _emailController.text.isNotEmpty &&
+                _emailController.text.contains('@')
+            ? const Icon(Icons.check_circle_rounded,
+                color: Colors.green, size: 20)
             : null,
         border: OutlineInputBorder(
           borderRadius: BorderRadius.circular(12),
@@ -462,10 +523,8 @@ class _AuthScreenState extends State<AuthScreen> {
             ),
             onPressed: _isLoading
                 ? null
-                : () {
-                    _showSnackBar(
-                      'Google Sign In coming soon - Please configure in Firebase Console',
-                    );
+                : () async {
+                    await _signInWithGoogle();
                   },
           ),
         ),
@@ -486,7 +545,8 @@ class _AuthScreenState extends State<AuthScreen> {
                 : () {
                     ScaffoldMessenger.of(context).showSnackBar(
                       const SnackBar(
-                        content: Text('Phone Sign In coming soon - Please configure in Firebase Console'),
+                        content: Text(
+                            'Phone Sign In coming soon - Please configure in Firebase Console'),
                         behavior: SnackBarBehavior.floating,
                         backgroundColor: AppColors.primary,
                       ),

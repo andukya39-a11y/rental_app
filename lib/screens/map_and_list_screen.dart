@@ -40,6 +40,8 @@ class _MapAndListScreenState extends State<MapAndListScreen> {
     'Other Zanzibar Areas'
   ];
 
+  final TextEditingController _searchController = TextEditingController();
+  String _searchQuery = '';
   final List<String> _categories = ['All', 'Room', 'Apartment', 'House'];
   bool _isMapView = true;
 
@@ -97,6 +99,7 @@ class _MapAndListScreenState extends State<MapAndListScreen> {
   @override
   void dispose() {
     _mapController?.dispose();
+    _searchController.dispose();
     super.dispose();
   }
 
@@ -186,7 +189,8 @@ class _MapAndListScreenState extends State<MapAndListScreen> {
                   ),
                 ),
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                   decoration: BoxDecoration(
                     color: Colors.grey[100],
                     borderRadius: BorderRadius.circular(8),
@@ -208,6 +212,10 @@ class _MapAndListScreenState extends State<MapAndListScreen> {
               border: Border.all(color: Colors.grey.withValues(alpha: 0.2)),
             ),
             child: TextField(
+              controller: _searchController,
+              onChanged: (value) {
+                setState(() => _searchQuery = value.trim().toLowerCase());
+              },
               decoration: InputDecoration(
                 hintText: 'Search homes, places...',
                 hintStyle: TextStyle(
@@ -219,18 +227,30 @@ class _MapAndListScreenState extends State<MapAndListScreen> {
                   color: AppColors.textSecondary.withValues(alpha: 0.5),
                   size: 20,
                 ),
-                suffixIcon: Container(
-                  margin: const EdgeInsets.all(8),
-                  decoration: BoxDecoration(
-                    color: AppColors.primary,
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                  child: const Icon(
-                    Icons.tune_rounded,
-                    color: Colors.white,
-                    size: 18,
-                  ),
-                ),
+                suffixIcon: _searchQuery.isNotEmpty
+                    ? IconButton(
+                        icon: Icon(
+                          Icons.clear_rounded,
+                          color: AppColors.textSecondary.withValues(alpha: 0.5),
+                          size: 18,
+                        ),
+                        onPressed: () {
+                          _searchController.clear();
+                          setState(() => _searchQuery = '');
+                        },
+                      )
+                    : Container(
+                        margin: const EdgeInsets.all(8),
+                        decoration: BoxDecoration(
+                          color: AppColors.primary,
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        child: const Icon(
+                          Icons.tune_rounded,
+                          color: Colors.white,
+                          size: 18,
+                        ),
+                      ),
                 border: InputBorder.none,
                 contentPadding: const EdgeInsets.symmetric(
                   horizontal: 14,
@@ -273,7 +293,8 @@ class _MapAndListScreenState extends State<MapAndListScreen> {
                       backgroundColor: Colors.white,
                       selectedColor: AppColors.primary,
                       checkmarkColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 12, vertical: 8),
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(20),
                         side: BorderSide(
@@ -329,397 +350,6 @@ class _MapAndListScreenState extends State<MapAndListScreen> {
     );
   }
 
-  Widget _buildRecentlyViewedSection() {
-    if (!_isLoggedIn) {
-      return _buildLoginPrompt(
-        icon: Icons.history_rounded,
-        title: 'Recently Viewed',
-        subtitle: 'Log in to see your recently viewed properties',
-      );
-    }
-
-    return StreamBuilder<List<HouseModel>>(
-      stream: _recentlyViewedService.getRecentlyViewedStream(),
-      builder: (context, snapshot) {
-        if (snapshot.connectionState == ConnectionState.waiting) {
-          return _buildSectionLoading('Recently Viewed');
-        }
-        if (snapshot.hasError) {
-          return _buildSectionError(
-            'Recently Viewed',
-            snapshot.error,
-          );
-        }
-
-        final houses = snapshot.data ?? [];
-        if (houses.isEmpty) {
-          return _buildLoginPrompt(
-            icon: Icons.history_rounded,
-            title: 'Recently Viewed',
-            subtitle: 'You haven\'t viewed any properties yet',
-          );
-        }
-
-        return _buildHorizontalHouseList(
-          title: 'Recently Viewed',
-          houses: houses,
-        );
-      },
-    );
-  }
-
-  Widget _buildRecommendationsSection() {
-    if (!_isLoggedIn) {
-      return _buildLoginPrompt(
-        icon: Icons.recommend_rounded,
-        title: 'Recommended For You',
-        subtitle: 'Log in to see personalized recommendations',
-      );
-    }
-
-    if (_isLoadingPreferences) {
-      return _buildSectionLoading('Recommended For You');
-    }
-
-    return StreamBuilder<List<HouseModel>>(
-      stream: _houseService.getHousesForRecommendationsStream(limit: 50),
-      builder: (context, snapshot) {
-        if (snapshot.connectionState == ConnectionState.waiting) {
-          return _buildSectionLoading('Recommended For You');
-        }
-        if (snapshot.hasError) {
-          return _buildSectionError(
-            'Recommended For You',
-            snapshot.error,
-          );
-        }
-
-        final houses = snapshot.data ?? [];
-        if (houses.isEmpty) {
-          return _buildLoginPrompt(
-            icon: Icons.recommend_rounded,
-            title: 'Recommended For You',
-            subtitle: 'No houses available for recommendations',
-          );
-        }
-
-        final scoredHouses = houses.map((house) {
-          int score = 0;
-          if (_userPreferences.preferredAreas.contains(house.location)) {
-            score += 40;
-          }
-          if (_userPreferences.propertyType == house.propertyType) {
-            score += 30;
-          }
-          if (house.price >= _userPreferences.minPrice &&
-              house.price <= _userPreferences.maxPrice) {
-            score += 30;
-          }
-          return {'house': house, 'score': score};
-        }).toList()
-          ..sort((a, b) => (b['score'] as int).compareTo(a['score'] as int));
-
-        final topHouses =
-            scoredHouses.take(3).map((e) => e['house'] as HouseModel).toList();
-
-        return _buildHorizontalHouseList(
-          title: 'Recommended For You',
-          houses: topHouses,
-        );
-      },
-    );
-  }
-
-  Widget _buildHorizontalHouseList({
-    required String title,
-    required List<HouseModel> houses,
-  }) {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Text(
-                title,
-                style: const TextStyle(
-                  fontSize: 17,
-                  fontWeight: FontWeight.w700,
-                  color: AppColors.textPrimary,
-                ),
-              ),
-              if (title == 'Recommended For You')
-                TextButton(
-                  onPressed: () {},
-                  child: const Text(
-                    'See all',
-                    style: TextStyle(
-                      color: AppColors.primary,
-                      fontWeight: FontWeight.w600,
-                      fontSize: 13,
-                    ),
-                  ),
-                ),
-            ],
-          ),
-          const SizedBox(height: 12),
-          SizedBox(
-            height: 130,
-            child: ListView.builder(
-              scrollDirection: Axis.horizontal,
-              itemCount: houses.length,
-              itemBuilder: (context, index) {
-                final house = houses[index];
-                return GestureDetector(
-                  onTap: () {
-                    Navigator.of(context).push(
-                      MaterialPageRoute(
-                        builder: (_) => HouseDetailScreen(house: house),
-                      ),
-                    );
-                  },
-                  child: Container(
-                    width: 150,
-                    margin: EdgeInsets.only(right: index < houses.length - 1 ? 12 : 0),
-                    decoration: BoxDecoration(
-                      color: Colors.white,
-                      borderRadius: BorderRadius.circular(16),
-                      boxShadow: [
-                        BoxShadow(
-                          color: Colors.black.withValues(alpha: 0.04),
-                          blurRadius: 8,
-                          offset: const Offset(0, 2),
-                        ),
-                      ],
-                    ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        ClipRRect(
-                          borderRadius: const BorderRadius.vertical(
-                            top: Radius.circular(16),
-                          ),
-                          child: house.imageUrl != null && house.imageUrl!.isNotEmpty
-                              ? Image.network(
-                                  house.imageUrl!,
-                                  height: 80,
-                                  width: double.infinity,
-                                  fit: BoxFit.cover,
-                                )
-                              : Container(
-                                  height: 80,
-                                  width: double.infinity,
-                                  color: Colors.grey[200],
-                                  child: Icon(
-                                    Icons.house_rounded,
-                                    size: 28,
-                                    color: Colors.grey[400],
-                                  ),
-                                ),
-                        ),
-                        Padding(
-                          padding: const EdgeInsets.all(10),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                house.title,
-                                style: const TextStyle(
-                                  fontSize: 13,
-                                  fontWeight: FontWeight.w600,
-                                  color: AppColors.textPrimary,
-                                ),
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                              const SizedBox(height: 3),
-                              Text(
-                                'TSh ${house.price.toStringAsFixed(0)}/mo',
-                                style: const TextStyle(
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.w600,
-                                  color: AppColors.primary,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                );
-              },
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildSectionLoading(String title) {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            title,
-            style: const TextStyle(
-              fontSize: 17,
-              fontWeight: FontWeight.w700,
-              color: AppColors.textPrimary,
-            ),
-          ),
-          const SizedBox(height: 12),
-          SizedBox(
-            height: 130,
-            child: ListView.builder(
-              scrollDirection: Axis.horizontal,
-              itemCount: 3,
-              itemBuilder: (context, index) => Container(
-                width: 150,
-                margin: EdgeInsets.only(right: index < 2 ? 12 : 0),
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.circular(16),
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Container(
-                      height: 80,
-                      width: double.infinity,
-                      decoration: BoxDecoration(
-                        color: Colors.grey[200],
-                        borderRadius: const BorderRadius.vertical(
-                          top: Radius.circular(16),
-                        ),
-                      ),
-                    ),
-                    Padding(
-                      padding: const EdgeInsets.all(10),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Container(
-                            height: 12,
-                            width: 100,
-                            decoration: BoxDecoration(
-                              color: Colors.grey[200],
-                              borderRadius: BorderRadius.circular(4),
-                            ),
-                          ),
-                          const SizedBox(height: 6),
-                          Container(
-                            height: 10,
-                            width: 60,
-                            decoration: BoxDecoration(
-                              color: Colors.grey[200],
-                              borderRadius: BorderRadius.circular(4),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildSectionError(String title, Object? error) {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            title,
-            style: const TextStyle(
-              fontSize: 17,
-              fontWeight: FontWeight.w700,
-              color: AppColors.textPrimary,
-            ),
-          ),
-          const SizedBox(height: 8),
-          Container(
-            padding: const EdgeInsets.all(14),
-            decoration: BoxDecoration(
-              color: Colors.red.withValues(alpha: 0.05),
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: Colors.red.withValues(alpha: 0.1)),
-            ),
-            child: Row(
-              children: [
-                Icon(Icons.error_outline_rounded, size: 18, color: Colors.red[400]),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    'Couldn\'t load. Pull to retry.',
-                    style: TextStyle(fontSize: 13, color: Colors.red[700]),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildLoginPrompt({
-    required IconData icon,
-    required String title,
-    required String subtitle,
-  }) {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            title,
-            style: const TextStyle(
-              fontSize: 17,
-              fontWeight: FontWeight.w700,
-              color: AppColors.textPrimary,
-            ),
-          ),
-          const SizedBox(height: 8),
-          Container(
-            padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(
-              color: Colors.grey[50],
-              borderRadius: BorderRadius.circular(14),
-              border: Border.all(color: Colors.grey.withValues(alpha: 0.15)),
-            ),
-            child: Row(
-              children: [
-                Icon(icon, size: 24, color: AppColors.textSecondary.withValues(alpha: 0.5)),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Text(
-                    subtitle,
-                    style: const TextStyle(
-                      fontSize: 14,
-                      color: AppColors.textSecondary,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
   Widget _buildMapView() {
     return StreamBuilder<List<HouseModel>>(
       stream: _houseService.getHousesStream(
@@ -737,7 +367,15 @@ class _MapAndListScreenState extends State<MapAndListScreen> {
           return _buildMapError('Error loading map');
         }
 
-        final houses = snapshot.data ?? [];
+        var houses = snapshot.data ?? [];
+        if (_searchQuery.isNotEmpty) {
+          houses = houses.where((h) {
+            final title = h.title.toLowerCase();
+            final location = h.location.toLowerCase();
+            return title.contains(_searchQuery) ||
+                location.contains(_searchQuery);
+          }).toList();
+        }
         _updateMarkers(houses);
 
         if (houses.isEmpty) {
@@ -779,7 +417,8 @@ class _MapAndListScreenState extends State<MapAndListScreen> {
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Icon(Icons.explore_off_rounded, size: 48, color: AppColors.textSecondary.withValues(alpha: 0.5)),
+          Icon(Icons.explore_off_rounded,
+              size: 48, color: AppColors.textSecondary.withValues(alpha: 0.5)),
           const SizedBox(height: 12),
           Text(
             'No houses in this area',
@@ -812,7 +451,15 @@ class _MapAndListScreenState extends State<MapAndListScreen> {
           return _buildListError(snapshot.error);
         }
 
-        final houses = snapshot.data ?? [];
+        var houses = snapshot.data ?? [];
+        if (_searchQuery.isNotEmpty) {
+          houses = houses.where((h) {
+            final title = h.title.toLowerCase();
+            final location = h.location.toLowerCase();
+            return title.contains(_searchQuery) ||
+                location.contains(_searchQuery);
+          }).toList();
+        }
         if (houses.isEmpty) {
           return _buildListEmpty();
         }
@@ -966,7 +613,8 @@ class _MapAndListScreenState extends State<MapAndListScreen> {
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         title: const Text(
           'Select Location',
-          style: TextStyle(fontWeight: FontWeight.bold, color: AppColors.textPrimary),
+          style: TextStyle(
+              fontWeight: FontWeight.bold, color: AppColors.textPrimary),
         ),
         content: SizedBox(
           width: double.maxFinite,
@@ -1038,4 +686,3 @@ class _ToggleButton extends StatelessWidget {
     );
   }
 }
-

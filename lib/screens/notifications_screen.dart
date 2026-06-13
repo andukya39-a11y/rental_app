@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
-import 'package:rental_app/utils/notification_service.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:rental_app/services/notification_model.dart';
+import 'package:rental_app/services/firebase_messaging_service.dart';
 import 'package:rental_app/constants/app_colors.dart';
 
 class NotificationsScreen extends StatefulWidget {
@@ -10,37 +12,66 @@ class NotificationsScreen extends StatefulWidget {
 }
 
 class _NotificationsScreenState extends State<NotificationsScreen> {
-  final NotificationService _notificationService = NotificationService();
-  final List<String> _notifications = [];
-  final Set<int> _unreadIndices = {};
+  final FirebaseMessagingService _fcmService = FirebaseMessagingService();
+  User? _currentUser;
 
   @override
   void initState() {
     super.initState();
-    _notificationService.notifications.listen((message) {
-      if (mounted) {
-        setState(() {
-          _notifications.insert(0, message);
-          _unreadIndices.add(0);
-        });
-      }
-    });
+    _currentUser = FirebaseAuth.instance.currentUser;
   }
 
-  void _markAsRead(int index) {
-    setState(() {
-      _unreadIndices.remove(index);
-    });
+  String _formatDate(DateTime date) {
+    final now = DateTime.now();
+    final diff = now.difference(date);
+
+    if (diff.inMinutes < 1) return 'Just now';
+    if (diff.inMinutes < 60) return '${diff.inMinutes}m ago';
+    if (diff.inHours < 24) return '${diff.inHours}h ago';
+    if (diff.inDays < 7) return '${diff.inDays}d ago';
+    if (diff.inDays < 30) {
+      final weeks = (diff.inDays / 7).floor();
+      return '${weeks}w ago';
+    }
+    return '${date.day}/${date.month}/${date.year}';
   }
 
-  void _markAllAsRead() {
-    setState(() {
-      _unreadIndices.clear();
-    });
+  IconData _getTypeIcon(String type) {
+    switch (type) {
+      case 'booking_request':
+        return Icons.calendar_month_rounded;
+      case 'booking_accepted':
+        return Icons.check_circle_rounded;
+      case 'booking_rejected':
+      case 'booking_cancelled':
+        return Icons.cancel_rounded;
+      case 'verification':
+        return Icons.verified_rounded;
+      default:
+        return Icons.notifications_rounded;
+    }
+  }
+
+  Color _getTypeColor(String type) {
+    switch (type) {
+      case 'booking_request':
+        return Colors.orange;
+      case 'booking_accepted':
+        return Colors.green;
+      case 'booking_rejected':
+      case 'booking_cancelled':
+        return Colors.red;
+      case 'verification':
+        return AppColors.primary;
+      default:
+        return AppColors.primary;
+    }
   }
 
   @override
   Widget build(BuildContext context) {
+    final userId = _currentUser?.uid;
+
     return Scaffold(
       backgroundColor: Colors.grey[50],
       appBar: AppBar(
@@ -53,59 +84,134 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
         ),
         backgroundColor: AppColors.primary,
         elevation: 0,
-        actions: [
-          if (_unreadIndices.isNotEmpty)
-            TextButton(
-              onPressed: _markAllAsRead,
-              child: const Text(
-                'Mark all read',
-                style: TextStyle(
-                  color: Colors.white,
-                  fontWeight: FontWeight.w600,
-                  fontSize: 14,
-                ),
-              ),
-            ),
-          if (_notifications.isNotEmpty)
-            IconButton(
-              icon: const Icon(Icons.delete_outline_rounded),
-              tooltip: 'Clear all',
-              onPressed: () {
-                setState(() {
-                  _notifications.clear();
-                  _unreadIndices.clear();
-                });
-              },
-            ),
-        ],
       ),
-      body: _notifications.isEmpty
-          ? _buildEmptyState()
-          : ListView.builder(
-              padding: const EdgeInsets.all(16),
-              itemCount: _notifications.length,
-              itemBuilder: (context, index) {
-                final isUnread = _unreadIndices.contains(index);
-                final isToday = index < 3;
-
-                if (index == 0 || (index == 3 && isToday)) {
-                  return _buildSectionHeader(
-                    label: isToday ? 'Today' : 'Earlier',
+      body: userId == null
+          ? _buildNotLoggedInState()
+          : StreamBuilder<List<NotificationModel>>(
+              stream: _fcmService.getUserNotifications(userId),
+              builder: (context, snapshot) {
+                if (snapshot.connectionState == ConnectionState.waiting) {
+                  return const Center(
+                    child: CircularProgressIndicator(
+                      color: AppColors.primary,
+                      strokeWidth: 3,
+                    ),
                   );
                 }
 
-                return Padding(
-                  padding: EdgeInsets.only(
-                    bottom: index < _notifications.length - 1 ? 12 : 0,
-                  ),
-                  child: _NotificationCard(
-                    message: _notifications[index],
-                    isUnread: isUnread,
-                    onTap: () => _markAsRead(index),
-                  ),
+                if (snapshot.hasError) {
+                  return _buildErrorState();
+                }
+
+                final notifications = snapshot.data ?? [];
+
+                if (notifications.isEmpty) {
+                  return _buildEmptyState();
+                }
+
+                final unreadCount =
+                    notifications.where((n) => !n.isRead).length;
+
+                return Column(
+                  children: [
+                    if (unreadCount > 0)
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 16, vertical: 10),
+                        child: Row(
+                          children: [
+                            Text(
+                              '$unreadCount unread notification${unreadCount > 1 ? 's' : ''}',
+                              style: TextStyle(
+                                fontSize: 13,
+                                fontWeight: FontWeight.w600,
+                                color: AppColors.primary,
+                              ),
+                            ),
+                            const Spacer(),
+                            GestureDetector(
+                              onTap: () async {
+                                await _fcmService.markAllAsRead(userId);
+                              },
+                              child: Text(
+                                'Mark all read',
+                                style: TextStyle(
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w600,
+                                  color: AppColors.textSecondary,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    Expanded(
+                      child: ListView.builder(
+                        padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
+                        itemCount: notifications.length,
+                        itemBuilder: (context, index) {
+                          final notification = notifications[index];
+                          return Padding(
+                            padding: const EdgeInsets.only(bottom: 12),
+                            child: _NotificationCard(
+                              notification: notification,
+                              dateStr: _formatDate(notification.createdAt),
+                              icon: _getTypeIcon(notification.type),
+                              color: _getTypeColor(notification.type),
+                              onTap: () {
+                                if (!notification.isRead) {
+                                  _fcmService.markAsRead(notification.id);
+                                }
+                              },
+                            ),
+                          );
+                        },
+                      ),
+                    ),
+                  ],
                 );
               },
             ),
+    );
+  }
+
+  Widget _buildNotLoggedInState() {
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Container(
+            width: 100,
+            height: 100,
+            decoration: BoxDecoration(
+              color: AppColors.primary.withValues(alpha: 0.06),
+              shape: BoxShape.circle,
+            ),
+            child: Icon(
+              Icons.person_outline_rounded,
+              size: 48,
+              color: AppColors.textSecondary.withValues(alpha: 0.4),
+            ),
+          ),
+          const SizedBox(height: 20),
+          Text(
+            'Sign in to see notifications',
+            style: TextStyle(
+              fontSize: 18,
+              fontWeight: FontWeight.w700,
+              color: AppColors.textPrimary,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'Your booking alerts will appear here',
+            style: TextStyle(
+              fontSize: 14,
+              color: AppColors.textSecondary,
+            ),
+          ),
+        ],
+      ),
     );
   }
 
@@ -149,52 +255,83 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
     );
   }
 
-  Widget _buildSectionHeader({required String label}) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(4, 8, 4, 12),
-      child: Text(
-        label,
-        style: TextStyle(
-          fontSize: 13,
-          fontWeight: FontWeight.w700,
-          color: AppColors.textSecondary,
-          letterSpacing: 0.3,
-        ),
+  Widget _buildErrorState() {
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Container(
+            width: 100,
+            height: 100,
+            decoration: BoxDecoration(
+              color: Colors.red.withValues(alpha: 0.06),
+              shape: BoxShape.circle,
+            ),
+            child: Icon(
+              Icons.signal_wifi_off_rounded,
+              size: 48,
+              color: Colors.red.withValues(alpha: 0.5),
+            ),
+          ),
+          const SizedBox(height: 20),
+          Text(
+            'Could not load notifications',
+            style: TextStyle(
+              fontSize: 18,
+              fontWeight: FontWeight.w700,
+              color: Colors.red[700],
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'Please check your connection and try again',
+            style: TextStyle(
+              fontSize: 14,
+              color: AppColors.textSecondary,
+            ),
+          ),
+        ],
       ),
     );
   }
 }
 
 class _NotificationCard extends StatelessWidget {
-  final String message;
-  final bool isUnread;
+  final NotificationModel notification;
+  final String dateStr;
+  final IconData icon;
+  final Color color;
   final VoidCallback onTap;
 
   const _NotificationCard({
-    required this.message,
-    required this.isUnread,
+    required this.notification,
+    required this.dateStr,
+    required this.icon,
+    required this.color,
     required this.onTap,
   });
 
   @override
   Widget build(BuildContext context) {
+    final isUnread = !notification.isRead;
+
     return GestureDetector(
       onTap: onTap,
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 200),
         decoration: BoxDecoration(
-          color: isUnread ? AppColors.primary.withValues(alpha: 0.04) : Colors.white,
+          color: isUnread ? color.withValues(alpha: 0.04) : Colors.white,
           borderRadius: BorderRadius.circular(16),
           border: Border.all(
             color: isUnread
-                ? AppColors.primary.withValues(alpha: 0.15)
+                ? color.withValues(alpha: 0.15)
                 : Colors.grey.withValues(alpha: 0.08),
             width: isUnread ? 1.2 : 0.5,
           ),
           boxShadow: isUnread
               ? [
                   BoxShadow(
-                    color: AppColors.primary.withValues(alpha: 0.08),
+                    color: color.withValues(alpha: 0.08),
                     blurRadius: 8,
                     offset: const Offset(0, 2),
                   ),
@@ -212,21 +349,15 @@ class _NotificationCard extends StatelessWidget {
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // Icon container
+              // Icon container with type-specific icon
               Container(
                 width: 42,
                 height: 42,
                 decoration: BoxDecoration(
-                  color: isUnread
-                      ? AppColors.primary.withValues(alpha: 0.12)
-                      : AppColors.primary.withValues(alpha: 0.08),
+                  color: color.withValues(alpha: isUnread ? 0.12 : 0.08),
                   shape: BoxShape.circle,
                 ),
-                child: Icon(
-                  Icons.notifications_rounded,
-                  color: AppColors.primary,
-                  size: 20,
-                ),
+                child: Icon(icon, color: color, size: 20),
               ),
               const SizedBox(width: 14),
               // Message content
@@ -235,12 +366,32 @@ class _NotificationCard extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      message,
+                      notification.title,
                       style: TextStyle(
                         fontSize: 14,
-                        fontWeight: isUnread ? FontWeight.w600 : FontWeight.w500,
+                        fontWeight: FontWeight.w700,
                         color: AppColors.textPrimary,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      notification.message,
+                      style: TextStyle(
+                        fontSize: 13,
+                        fontWeight:
+                            isUnread ? FontWeight.w600 : FontWeight.w500,
+                        color: isUnread
+                            ? AppColors.textPrimary
+                            : AppColors.textSecondary,
                         height: 1.4,
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      dateStr,
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: AppColors.textSecondary.withValues(alpha: 0.7),
                       ),
                     ),
                   ],
@@ -251,12 +402,13 @@ class _NotificationCard extends StatelessWidget {
                 Container(
                   width: 10,
                   height: 10,
+                  margin: const EdgeInsets.only(top: 4),
                   decoration: BoxDecoration(
-                    color: AppColors.primary,
+                    color: color,
                     shape: BoxShape.circle,
                     boxShadow: [
                       BoxShadow(
-                        color: AppColors.primary.withValues(alpha: 0.4),
+                        color: color.withValues(alpha: 0.4),
                         blurRadius: 4,
                         offset: const Offset(0, 1),
                       ),

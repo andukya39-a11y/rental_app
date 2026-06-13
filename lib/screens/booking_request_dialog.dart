@@ -53,7 +53,8 @@ class _BookingRequestDialogState extends State<BookingRequestDialog> {
                       height: 100,
                       width: double.infinity,
                       color: Colors.grey[300],
-                      child: const Icon(Icons.house, size: 40, color: Colors.grey),
+                      child:
+                          const Icon(Icons.house, size: 40, color: Colors.grey),
                     ),
             ),
             const SizedBox(height: 16),
@@ -113,7 +114,8 @@ class _BookingRequestDialogState extends State<BookingRequestDialog> {
               : () async {
                   if (_selectedMoveInDate == null) {
                     ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text('Please select a move-in date')),
+                      const SnackBar(
+                          content: Text('Please select a move-in date')),
                     );
                     return;
                   }
@@ -134,17 +136,19 @@ class _BookingRequestDialogState extends State<BookingRequestDialog> {
                       landlordId: widget.landlordId,
                       moveInDate: _selectedMoveInDate!,
                       rentalDurationMonths: _selectedRentalDuration,
-                      verificationStatus: widget.verificationStatus, // Add verification status
+                      verificationStatus: widget.verificationStatus,
                     );
                     if (!mounted) return;
                     Navigator.of(context).pop();
+                    if (!mounted) return;
                     ScaffoldMessenger.of(context).showSnackBar(
                       const SnackBar(content: Text('Booking request sent!')),
                     );
                   } catch (e) {
                     if (!mounted) return;
                     ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(content: Text('Failed to send booking request: $e')),
+                      SnackBar(
+                          content: Text('Failed to send booking request: $e')),
                     );
                   } finally {
                     if (mounted) setState(() => _isLoading = false);

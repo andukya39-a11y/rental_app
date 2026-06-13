@@ -69,11 +69,10 @@ class _MyBookingsScreenState extends State<MyBookingsScreen> {
                   return ListView.builder(
                     padding: const EdgeInsets.all(16),
                     itemCount: 4,
-                    itemBuilder: (context, index) =>
-                        const Padding(
-                          padding: EdgeInsets.only(bottom: 16),
-                          child: _BookingCardSkeleton(),
-                        ),
+                    itemBuilder: (context, index) => const Padding(
+                      padding: EdgeInsets.only(bottom: 16),
+                      child: _BookingCardSkeleton(),
+                    ),
                   );
                 }
                 if (snapshot.hasError) {
@@ -218,13 +217,84 @@ class _MyBookingsScreenState extends State<MyBookingsScreen> {
   }
 }
 
-class _BookingCard extends StatelessWidget {
+class _BookingCard extends StatefulWidget {
   final BookingModel booking;
 
   const _BookingCard({required this.booking});
 
   @override
+  State<_BookingCard> createState() => _BookingCardState();
+}
+
+class _BookingCardState extends State<_BookingCard> {
+  final BookingService _bookingService = BookingService();
+  bool _isCancelling = false;
+
+  Future<void> _cancelBooking() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Text(
+          'Cancel Booking?',
+          style: TextStyle(fontWeight: FontWeight.w700),
+        ),
+        content: Text(
+          'Are you sure you want to cancel your booking request for "${widget.booking.houseTitle}"?',
+          style: const TextStyle(fontSize: 14),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Keep Booking'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.red,
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(10),
+              ),
+            ),
+            child: const Text('Cancel Booking'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true) return;
+
+    setState(() => _isCancelling = true);
+    try {
+      await _bookingService.updateBookingStatus(widget.booking.id, 'cancelled');
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Booking cancelled successfully'),
+          backgroundColor: Colors.green,
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Failed to cancel booking: $e'),
+          backgroundColor: Colors.red,
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _isCancelling = false);
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final booking = widget.booking;
+    final isPending = booking.status == 'pending';
+
     return Container(
       decoration: BoxDecoration(
         color: Colors.white,
@@ -340,7 +410,10 @@ class _BookingCard extends StatelessWidget {
                       child: _DetailRow(
                         icon: Icons.calendar_month_rounded,
                         label: 'Move-in',
-                        value: booking.moveInDate.toLocal().toString().split(' ')[0],
+                        value: booking.moveInDate
+                            .toLocal()
+                            .toString()
+                            .split(' ')[0],
                       ),
                     ),
                     Container(
@@ -373,6 +446,40 @@ class _BookingCard extends StatelessWidget {
                     ),
                   ],
                 ),
+                // Cancel button (only for pending bookings)
+                if (isPending) ...[
+                  const SizedBox(height: 14),
+                  SizedBox(
+                    width: double.infinity,
+                    height: 44,
+                    child: OutlinedButton.icon(
+                      onPressed: _isCancelling ? null : _cancelBooking,
+                      icon: _isCancelling
+                          ? const SizedBox(
+                              width: 18,
+                              height: 18,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                              ),
+                            )
+                          : const Icon(Icons.cancel_outlined, size: 18),
+                      label: Text(
+                        _isCancelling ? 'Cancelling...' : 'Cancel Booking',
+                        style: const TextStyle(
+                          fontWeight: FontWeight.w600,
+                          fontSize: 14,
+                        ),
+                      ),
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: Colors.red,
+                        side: const BorderSide(color: Colors.red),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
               ],
             ),
           ),
@@ -550,7 +657,8 @@ class _BookingCardSkeleton extends StatelessWidget {
             width: double.infinity,
             decoration: BoxDecoration(
               color: Colors.grey[200],
-              borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+              borderRadius:
+                  const BorderRadius.vertical(top: Radius.circular(20)),
             ),
           ),
           Padding(
