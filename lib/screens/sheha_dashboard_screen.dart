@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:rental_app/models/house_model.dart';
 import 'package:rental_app/models/verification_request_model.dart';
 import 'package:rental_app/services/house_service.dart';
@@ -14,9 +15,84 @@ class ShehaDashboardScreen extends StatefulWidget {
 
 class _ShehaDashboardScreenState extends State<ShehaDashboardScreen> {
   final HouseService _houseService = HouseService();
+  bool _isAuthorized = false;
+  bool _isCheckingAuth = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _checkAuthorization();
+  }
+
+  Future<void> _checkAuthorization() async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) {
+      setState(() {
+        _isAuthorized = false;
+        _isCheckingAuth = false;
+      });
+      return;
+    }
+
+    try {
+      // Check if the user is registered as a Sheha in Firestore
+      final doc = await FirebaseFirestore.instance
+          .collection('shehas')
+          .doc(user.uid)
+          .get();
+
+      setState(() {
+        _isAuthorized = doc.exists && doc.data()?['isActive'] == true;
+        _isCheckingAuth = false;
+      });
+    } catch (e) {
+      setState(() {
+        _isAuthorized = false;
+        _isCheckingAuth = false;
+      });
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
+    if (_isCheckingAuth) {
+      return Scaffold(
+        backgroundColor: Colors.grey[50],
+        appBar: AppBar(
+          title: const Text(
+            'Verification Requests',
+            style: TextStyle(
+              fontWeight: FontWeight.bold,
+              color: Colors.white,
+            ),
+          ),
+          backgroundColor: AppColors.primary,
+          elevation: 0,
+        ),
+        body: const Center(
+          child: CircularProgressIndicator(color: AppColors.primary),
+        ),
+      );
+    }
+
+    if (!_isAuthorized) {
+      return Scaffold(
+        backgroundColor: Colors.grey[50],
+        appBar: AppBar(
+          title: const Text(
+            'Access Denied',
+            style: TextStyle(
+              fontWeight: FontWeight.bold,
+              color: Colors.white,
+            ),
+          ),
+          backgroundColor: AppColors.primary,
+          elevation: 0,
+        ),
+        body: _buildUnauthorizedState(),
+      );
+    }
+
     return Scaffold(
       backgroundColor: Colors.grey[50],
       appBar: AppBar(
@@ -37,11 +113,10 @@ class _ShehaDashboardScreenState extends State<ShehaDashboardScreen> {
             return ListView.builder(
               padding: const EdgeInsets.all(16),
               itemCount: 3,
-              itemBuilder: (context, index) =>
-                  const Padding(
-                    padding: EdgeInsets.only(bottom: 16),
-                    child: _VerificationCardSkeleton(),
-                  ),
+              itemBuilder: (context, index) => const Padding(
+                padding: EdgeInsets.only(bottom: 16),
+                child: _VerificationCardSkeleton(),
+              ),
             );
           }
           if (snapshot.hasError) {
@@ -65,6 +140,70 @@ class _ShehaDashboardScreenState extends State<ShehaDashboardScreen> {
             },
           );
         },
+      ),
+    );
+  }
+
+  Widget _buildUnauthorizedState() {
+    return Center(
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.all(32),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Container(
+              width: 100,
+              height: 100,
+              decoration: BoxDecoration(
+                color: Colors.red.withValues(alpha: 0.06),
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(
+                Icons.lock_outline_rounded,
+                size: 48,
+                color: Colors.red,
+              ),
+            ),
+            const SizedBox(height: 20),
+            const Text(
+              'Access Restricted',
+              style: TextStyle(
+                fontSize: 20,
+                fontWeight: FontWeight.w700,
+                color: AppColors.textPrimary,
+              ),
+            ),
+            const SizedBox(height: 8),
+            const Text(
+              'Only authorized Sheha officers can access this dashboard.\n\n'
+              'If you are a Sheha officer, please contact an administrator '
+              'to grant you access.',
+              style: TextStyle(
+                fontSize: 14,
+                color: AppColors.textSecondary,
+                height: 1.5,
+              ),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 24),
+            OutlinedButton.icon(
+              onPressed: () => Navigator.of(context).pop(),
+              icon: const Icon(Icons.arrow_back_rounded, size: 18),
+              label: const Text('Go Back'),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: AppColors.primary,
+                side: const BorderSide(color: AppColors.primary),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 24,
+                  vertical: 12,
+                ),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -392,7 +531,8 @@ class _VerificationRequestCard extends StatelessWidget {
                             label: const Text('Reject'),
                             style: OutlinedButton.styleFrom(
                               foregroundColor: Colors.red,
-                              side: BorderSide(color: Colors.red.withValues(alpha: 0.4)),
+                              side: BorderSide(
+                                  color: Colors.red.withValues(alpha: 0.4)),
                               padding: const EdgeInsets.symmetric(vertical: 12),
                               shape: RoundedRectangleBorder(
                                 borderRadius: BorderRadius.circular(12),

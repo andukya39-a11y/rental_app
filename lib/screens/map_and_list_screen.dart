@@ -4,7 +4,6 @@ import 'package:rental_app/models/house_model.dart';
 import 'package:rental_app/services/house_service.dart';
 import 'package:rental_app/models/preferences_model.dart';
 import 'package:rental_app/services/preferences_service.dart';
-import 'package:rental_app/services/recently_viewed_service.dart';
 import 'package:rental_app/widgets/house_card.dart';
 import 'package:rental_app/screens/house_detail_screen.dart';
 import 'package:rental_app/constants/app_colors.dart';
@@ -20,7 +19,6 @@ class MapAndListScreen extends StatefulWidget {
 class _MapAndListScreenState extends State<MapAndListScreen> {
   final HouseService _houseService = HouseService();
   final PreferencesService _preferencesService = PreferencesService();
-  final RecentlyViewedService _recentlyViewedService = RecentlyViewedService();
 
   String _selectedLocation = 'Zanzibar City';
   String _selectedCategory = 'All';
@@ -376,7 +374,33 @@ class _MapAndListScreenState extends State<MapAndListScreen> {
                 location.contains(_searchQuery);
           }).toList();
         }
-        _updateMarkers(houses);
+        // Clear and set markers without calling setState during build
+        _markers.clear();
+        _housesById.clear();
+        for (final house in houses) {
+          if (house.latitude != null && house.longitude != null) {
+            final markerId = MarkerId(house.id);
+            final marker = Marker(
+              markerId: markerId,
+              position: LatLng(house.latitude!, house.longitude!),
+              infoWindow: InfoWindow(
+                title: house.title,
+                snippet: 'TSh ${house.price.toStringAsFixed(0)}/month',
+              ),
+              onTap: () {
+                if (mounted) {
+                  Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (_) => HouseDetailScreen(house: house),
+                    ),
+                  );
+                }
+              },
+            );
+            _markers.add(marker);
+            _housesById[house.id] = house;
+          }
+        }
 
         if (houses.isEmpty) {
           return _buildMapEmpty();

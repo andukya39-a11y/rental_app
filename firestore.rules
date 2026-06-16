@@ -1,24 +1,129 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
+
+    // =============================================
+    // HOUSES collection - Read by anyone logged in
+    // Create/Update/Delete by the house owner
+    // =============================================
+    match /houses/{houseId} {
+      // Anyone authenticated can read houses
+      allow read: if request.auth != null;
+      // Create: authenticated user sets their userId
+      allow create: if request.auth != null &&
+                    request.auth.uid == request.resource.data.userId;
+      // Update: house owner can update
+      allow update: if request.auth != null &&
+                    request.auth.uid == resource.data.userId;
+      // Delete: house owner can delete
+      allow delete: if request.auth != null &&
+                    request.auth.uid == resource.data.userId;
+    }
+
+    // =============================================
+    // BOOKINGS collection
+    // =============================================
     match /bookings/{bookingId} {
       // Allow read if the user is either the tenant or the landlord
       allow read: if request.auth != null &&
                   (request.auth.uid == resource.data.tenantId ||
                    request.auth.uid == resource.data.landlordId);
 
-      // Allow create if the user is the tenant and the tenantId matches the auth uid
+      // Allow create if the user is the tenant and tenantId matches auth uid
       allow create: if request.auth != null &&
                     request.auth.uid == request.resource.data.tenantId;
 
-      // Allow update if the user is the landlord and they are only updating the status and/or message
+      // Allow update if the user is the landlord updating status/message
       allow update: if request.auth != null &&
                     request.auth.uid == resource.data.landlordId &&
-                    request.resource.data.keys().hasOnly(['status', 'message']);
+                    request.resource.data.keys().hasOnly(['status', 'message', 'updatedAt']);
 
       // Allow delete (cancel) if the user is the tenant
       allow delete: if request.auth != null &&
                     request.auth.uid == resource.data.tenantId;
+    }
+
+    // =============================================
+    // USERS collection - preferences & recentlyViewed
+    // =============================================
+    match /users/{userId} {
+      // Each user can only read/write their own document
+      allow read, write: if request.auth != null &&
+                          request.auth.uid == userId;
+    }
+
+    // =============================================
+    // FCM TOKENS - for push notifications
+    // =============================================
+    match /fcm_tokens/{userId} {
+      // Each user can only manage their own token
+      allow read, write: if request.auth != null &&
+                          request.auth.uid == userId;
+    }
+
+    // =============================================
+    // APP NOTIFICATIONS - stored in-app notifications
+    // =============================================
+    match /app_notifications/{notificationId} {
+      // Users can read their own notifications
+      allow read: if request.auth != null &&
+                   request.auth.uid == resource.data.userId;
+      // System creates notifications (allow any authenticated user to create)
+      allow create: if request.auth != null;
+      // Users can update their own notifications (mark as read)
+      allow update: if request.auth != null &&
+                    request.auth.uid == resource.data.userId;
+      // Users can delete their own notifications
+      allow delete: if request.auth != null &&
+                    request.auth.uid == resource.data.userId;
+    }
+
+    // =============================================
+    // FCM NOTIFICATIONS - pending push notification queue
+    // =============================================
+    match /fcm_notifications/{notificationId} {
+      // Allow any authenticated user to create
+      allow create: if request.auth != null;
+      // Users can read/delete their own
+      allow read, delete: if request.auth != null &&
+                           request.auth.uid == resource.data.userId;
+    }
+
+    // =============================================
+    // VERIFICATION REQUESTS - Sheha dashboard
+    // =============================================
+    match /verification_requests/{requestId} {
+      // Any authenticated user can create a verification request
+      allow create: if request.auth != null;
+      // Sheha officers can read all requests
+      allow read: if request.auth != null;
+      // Sheha officers can update/delete requests
+      allow update, delete: if request.auth != null;
+    }
+
+    // =============================================
+    // SHEHAS collection - authorized Sheha officers
+    // =============================================
+    match /shehas/{userId} {
+      // Any authenticated user can read sheha list
+      allow read: if request.auth != null;
+      // Only the sheha themselves or admin can write
+      allow write: if request.auth != null &&
+                   request.auth.uid == userId;
+    }
+
+    // =============================================
+    // REVIEWS collection
+    // =============================================
+    match /reviews/{reviewId} {
+      // Any authenticated user can read reviews
+      allow read: if request.auth != null;
+      // Authenticated user can create a review
+      allow create: if request.auth != null &&
+                    request.auth.uid == request.resource.data.userId;
+      // Review author can update/delete their review
+      allow update, delete: if request.auth != null &&
+                            request.auth.uid == resource.data.userId;
     }
   }
 }

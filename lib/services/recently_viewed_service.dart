@@ -1,7 +1,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 
-import '../models/house_model.dart';
+import 'package:rental_app/models/house_model.dart';
 
 class RecentlyViewedService {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
@@ -48,10 +48,8 @@ class RecentlyViewedService {
         if (recent.isEmpty) {
           return <HouseModel>[];
         }
-        final houseIds = recent
-            .take(10)
-            .map((e) => e['houseId'] as String)
-            .toList();
+        final houseIds =
+            recent.take(10).map((e) => e['houseId'] as String).toList();
         if (houseIds.isEmpty) {
           return <HouseModel>[];
         }

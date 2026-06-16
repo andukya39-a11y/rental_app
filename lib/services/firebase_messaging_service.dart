@@ -1,9 +1,14 @@
 import 'dart:async';
+import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:rental_app/services/notification_model.dart';
+import 'package:rental_app/main.dart';
+import 'package:rental_app/screens/my_bookings_screen.dart';
+import 'package:rental_app/screens/house_detail_screen.dart';
+import 'package:rental_app/services/house_service.dart';
 
 @pragma('vm:entry-point')
 Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
@@ -74,10 +79,15 @@ class FirebaseMessagingService {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) return;
 
-    await _firestore.collection('fcm_tokens').doc(user.uid).set({
-      'token': token,
-      'updatedAt': FieldValue.serverTimestamp(),
-    }, SetOptions(merge: true));
+    try {
+      await _firestore.collection('fcm_tokens').doc(user.uid).set({
+        'token': token,
+        'updatedAt': FieldValue.serverTimestamp(),
+      }, SetOptions(merge: true));
+    } catch (e) {
+      // FCM token storage is non-critical; device may not have Firestore rules configured yet
+      debugPrint('Failed to save FCM token: $e');
+    }
   }
 
   Future<void> _handleForegroundMessage(RemoteMessage message) async {
@@ -146,9 +156,44 @@ class FirebaseMessagingService {
   }
 
   void _handleNotificationTap(Map<String, dynamic> data) {
-    // Handle navigation when notification is tapped
-    // The data contains type and relatedId for routing
-    // Navigation handling would be done via a navigator key in main.dart
+    // Handle navigation when notification is tapped using the global navigator key
+    final type = data['type'] as String? ?? '';
+    final relatedId = data['relatedId'] as String?;
+    final context = navigatorKey.currentContext;
+    if (context == null) return;
+
+    switch (type) {
+      case 'booking_request':
+      case 'booking_accepted':
+      case 'booking_rejected':
+      case 'booking_cancelled':
+        navigatorKey.currentState?.push(
+          MaterialPageRoute(
+            builder: (_) => const MyBookingsScreen(),
+          ),
+        );
+        break;
+      case 'verification':
+        navigatorKey.currentState?.push(
+          MaterialPageRoute(
+            builder: (_) => const MyBookingsScreen(),
+          ),
+        );
+        break;
+      default:
+        if (relatedId != null) {
+          HouseService().getHouseById(relatedId).then((house) {
+            if (house != null) {
+              navigatorKey.currentState?.push(
+                MaterialPageRoute(
+                  builder: (_) => HouseDetailScreen(house: house),
+                ),
+              );
+            }
+          });
+        }
+        break;
+    }
   }
 
   // Create a server-side notification in Firestore

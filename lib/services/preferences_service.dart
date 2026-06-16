@@ -1,6 +1,6 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 
-import '../models/preferences_model.dart';
+import 'package:rental_app/models/preferences_model.dart';
 
 class PreferencesService {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;

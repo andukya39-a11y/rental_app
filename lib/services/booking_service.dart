@@ -1,7 +1,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import '../models/booking_model.dart';
-import 'firebase_messaging_service.dart';
+import 'package:rental_app/models/booking_model.dart';
+import 'package:rental_app/services/firebase_messaging_service.dart';
 
 class BookingService {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;

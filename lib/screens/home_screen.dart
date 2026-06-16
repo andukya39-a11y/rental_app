@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:rental_app/screens/map_and_list_screen.dart';
 import 'package:rental_app/screens/my_bookings_screen.dart';
 import 'package:rental_app/screens/notifications_screen.dart';
@@ -10,8 +11,11 @@ import 'package:rental_app/screens/preferences_screen.dart';
 import 'package:rental_app/screens/sheha_dashboard_screen.dart';
 import 'package:rental_app/models/house_model.dart';
 import 'package:rental_app/services/house_service.dart';
+import 'package:rental_app/services/preferences_service.dart';
+import 'package:rental_app/models/preferences_model.dart';
 import 'package:rental_app/widgets/house_card.dart';
 import 'package:rental_app/constants/app_colors.dart';
+import 'package:geolocator/geolocator.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({Key? key}) : super(key: key);
@@ -148,7 +152,7 @@ class _HomeDashboard extends StatelessWidget {
                 crossAxisSpacing: 12,
                 mainAxisSpacing: 12,
               ),
-                  delegate: SliverChildBuilderDelegate(
+              delegate: SliverChildBuilderDelegate(
                 (context, index) {
                   final items = [
                     _ActionItem(Icons.search_rounded, 'Browse Rentals', () {
@@ -160,22 +164,24 @@ class _HomeDashboard extends StatelessWidget {
                         ),
                       );
                     }),
-                    _ActionItem(Icons.add_circle_outline_rounded, 'Add Property', () {
+                    _ActionItem(
+                        Icons.add_circle_outline_rounded, 'Add Property', () {
                       Navigator.of(context).push(
                         MaterialPageRoute(
                           builder: (_) => const AddHouseScreen(),
                         ),
                       );
                     }),
-                    _ActionItem(Icons.favorite_outline_rounded, 'Preferences', () {
+                    _ActionItem(Icons.favorite_outline_rounded, 'Preferences',
+                        () {
                       Navigator.of(context).push(
                         MaterialPageRoute(
-                          builder: (_) =>
-                              const PreferencesScreen(),
+                          builder: (_) => const PreferencesScreen(),
                         ),
                       );
                     }),
-                    _ActionItem(Icons.verified_user_outlined, 'Sheha Dashboard', () {
+                    _ActionItem(Icons.verified_user_outlined, 'Sheha Dashboard',
+                        () {
                       Navigator.of(context).push(
                         MaterialPageRoute(
                           builder: (_) => const ShehaDashboardScreen(),
@@ -190,12 +196,45 @@ class _HomeDashboard extends StatelessWidget {
               ),
             ),
           ),
-          // Recommended section
-          SliverToBoxAdapter(
+          // Recommended section (preference-scored)
+          const _RecommendedSection(),
+          // Houses Near Me section (GPS-based)
+          const _HousesNearMeSection(),
+        ],
+      ),
+    );
+  }
+}
+
+/// Section showing houses scored by user preferences
+class _RecommendedSection extends StatelessWidget {
+  const _RecommendedSection();
+
+  @override
+  Widget build(BuildContext context) {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) {
+      // No user logged in – show generic recommendations
+      return SliverPadding(
+        padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+        sliver: StreamBuilder<List<HouseModel>>(
+          stream: HouseService().getHousesForRecommendationsStream(limit: 5),
+          builder: (context, snapshot) {
+            return _buildRecommendationsList(context, snapshot);
+          },
+        ),
+      );
+    }
+
+    // Logged in – fetch preferences and score houses
+    return FutureBuilder<Preferences>(
+      future: PreferencesService().getPreferences(user.uid),
+      builder: (context, prefSnapshot) {
+        if (prefSnapshot.connectionState == ConnectionState.waiting) {
+          return SliverToBoxAdapter(
             child: Padding(
               padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
               child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
                   const Text(
                     'Recommended',
@@ -204,108 +243,365 @@ class _HomeDashboard extends StatelessWidget {
                       fontWeight: FontWeight.bold,
                     ),
                   ),
-                  TextButton(
-                    onPressed: () {
-                      Navigator.of(context).push(
-                        MaterialPageRoute(
-                          builder: (_) => const HouseListScreen(),
-                        ),
-                      );
-                    },
-                    child: const Text('See all'),
+                  const Spacer(),
+                  SizedBox(
+                    width: 16,
+                    height: 16,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: AppColors.primary,
+                    ),
                   ),
                 ],
               ),
             ),
+          );
+        }
+
+        final preferences = prefSnapshot.data ??
+            Preferences(
+              preferredAreas: [],
+              minPrice: 0.0,
+              maxPrice: 1000000.0,
+              propertyType: 'Room',
+            );
+
+        return SliverPadding(
+          padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+          sliver: StreamBuilder<List<HouseModel>>(
+            stream: HouseService().getRecommendedHousesStream(
+              preferences: preferences,
+              limit: 5,
+            ),
+            builder: (context, snapshot) {
+              return _buildRecommendationsList(context, snapshot);
+            },
           ),
-          SliverPadding(
-            padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-            sliver: StreamBuilder<List<HouseModel>>(
-              stream:
-                  HouseService().getHousesForRecommendationsStream(limit: 5),
-              builder: (context, snapshot) {
-                if (snapshot.connectionState == ConnectionState.waiting) {
-                  return SliverPadding(
-                    padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-                    sliver: SliverList(
-                      delegate: SliverChildBuilderDelegate(
-                (context, index) => Padding(
-                  padding: const EdgeInsets.only(bottom: 16),
-                  child: HouseCardSkeleton(),
-                ),
-                childCount: 3,
+        );
+      },
+    );
+  }
+
+  Widget _buildRecommendationsList(
+      BuildContext context, AsyncSnapshot<List<HouseModel>> snapshot) {
+    if (snapshot.connectionState == ConnectionState.waiting) {
+      return SliverPadding(
+        padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+        sliver: SliverList(
+          delegate: SliverChildBuilderDelegate(
+            (context, index) => Padding(
+              padding: const EdgeInsets.only(bottom: 16),
+              child: HouseCardSkeleton(),
+            ),
+            childCount: 3,
+          ),
+        ),
+      );
+    }
+    final houses = snapshot.data ?? [];
+    if (houses.isEmpty) {
+      return SliverPadding(
+        padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
+        sliver: SliverToBoxAdapter(
+          child: Container(
+            padding: const EdgeInsets.all(24),
+            decoration: BoxDecoration(
+              color: Colors.grey[50],
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(
+                color: Colors.grey.withValues(alpha: 0.1),
+                width: 1,
               ),
-                    ),
-                  );
-                }
-                final houses = snapshot.data ?? [];
-                if (houses.isEmpty) {
-                  return SliverPadding(
-                    padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
-                    sliver: SliverToBoxAdapter(
-                      child: Container(
-                        padding: const EdgeInsets.all(24),
-                        decoration: BoxDecoration(
-                          color: Colors.grey[50],
-                          borderRadius: BorderRadius.circular(16),
-                          border: Border.all(
-                            color: Colors.grey.withValues(alpha: 0.1),
-                            width: 1,
-                          ),
-                        ),
-                        child: Column(
-                          children: [
-                            Icon(
-                              Icons.explore_off_rounded,
-                              size: 48,
-                              color: AppColors.textSecondary.withValues(alpha: 0.5),
-                            ),
-                            const SizedBox(height: 12),
-                            Text(
-                              'No recommendations yet',
-                              style: TextStyle(
-                                fontSize: 16,
-                                fontWeight: FontWeight.w600,
-                                color: AppColors.textPrimary,
-                              ),
-                            ),
-                            const SizedBox(height: 4),
-                            Text(
-                              'Browse listings to get personalized suggestions',
-                              style: TextStyle(
-                                fontSize: 14,
-                                color: AppColors.textSecondary,
-                              ),
-                              textAlign: TextAlign.center,
-                            ),
-                          ],
-                        ),
+            ),
+            child: Column(
+              children: [
+                Icon(
+                  Icons.explore_off_rounded,
+                  size: 48,
+                  color: AppColors.textSecondary.withValues(alpha: 0.5),
+                ),
+                const SizedBox(height: 12),
+                Text(
+                  'No recommendations yet',
+                  style: TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w600,
+                    color: AppColors.textPrimary,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  'Set your preferences to get personalized suggestions',
+                  style: TextStyle(
+                    fontSize: 14,
+                    color: AppColors.textSecondary,
+                  ),
+                  textAlign: TextAlign.center,
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
+    // Section header
+    return SliverList(
+      delegate: SliverChildBuilderDelegate(
+        (context, index) {
+          if (index == 0) {
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    const Text(
+                      'Recommended',
+                      style: TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
                       ),
                     ),
-                  );
-                }
-                return SliverList(
-                  delegate: SliverChildBuilderDelegate(
-                    (context, index) {
-                      final house = houses[index];
-                      return HouseCard(
-                        house: house,
-                        onTap: () {
-                          Navigator.of(context).push(
-                            MaterialPageRoute(
-                              builder: (_) => HouseDetailScreen(house: house),
-                            ),
-                          );
-                        },
-                      );
-                    },
-                    childCount: houses.length,
+                    TextButton(
+                      onPressed: () {
+                        Navigator.of(context).push(
+                          MaterialPageRoute(
+                            builder: (_) => const HouseListScreen(),
+                          ),
+                        );
+                      },
+                      child: const Text('See all'),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                HouseCard(
+                  house: houses[0],
+                  onTap: () {
+                    Navigator.of(context).push(
+                      MaterialPageRoute(
+                        builder: (_) => HouseDetailScreen(house: houses[0]),
+                      ),
+                    );
+                  },
+                ),
+              ],
+            );
+          }
+          final house = houses[index];
+          return Padding(
+            padding: const EdgeInsets.only(top: 12),
+            child: HouseCard(
+              house: house,
+              onTap: () {
+                Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder: (_) => HouseDetailScreen(house: house),
                   ),
                 );
               },
             ),
+          );
+        },
+        childCount: houses.length,
+      ),
+    );
+  }
+}
+
+/// Section showing houses sorted by distance from user's current location
+class _HousesNearMeSection extends StatefulWidget {
+  const _HousesNearMeSection();
+
+  @override
+  State<_HousesNearMeSection> createState() => _HousesNearMeSectionState();
+}
+
+class _HousesNearMeSectionState extends State<_HousesNearMeSection> {
+  Position? _currentPosition;
+  bool _isLocating = true;
+  String? _locationError;
+
+  @override
+  void initState() {
+    super.initState();
+    _determinePosition();
+  }
+
+  Future<void> _determinePosition() async {
+    setState(() => _isLocating = true);
+    try {
+      bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
+      if (!serviceEnabled) {
+        setState(() {
+          _locationError = 'Location services are disabled';
+          _isLocating = false;
+        });
+        return;
+      }
+
+      LocationPermission permission = await Geolocator.checkPermission();
+      if (permission == LocationPermission.denied) {
+        permission = await Geolocator.requestPermission();
+        if (permission == LocationPermission.denied) {
+          setState(() {
+            _locationError = 'Location permissions are denied';
+            _isLocating = false;
+          });
+          return;
+        }
+      }
+
+      if (permission == LocationPermission.deniedForever) {
+        setState(() {
+          _locationError = 'Location permissions are permanently denied';
+          _isLocating = false;
+        });
+        return;
+      }
+
+      final position = await Geolocator.getCurrentPosition(
+        desiredAccuracy: LocationAccuracy.high,
+      );
+      setState(() {
+        _currentPosition = position;
+        _isLocating = false;
+      });
+    } catch (e) {
+      setState(() {
+        _locationError = 'Could not determine location';
+        _isLocating = false;
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_isLocating) {
+      return SliverToBoxAdapter(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+          child: Row(
+            children: [
+              const Text(
+                'Houses Near Me',
+                style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              const SizedBox(width: 8),
+              SizedBox(
+                width: 16,
+                height: 16,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  color: AppColors.primary,
+                ),
+              ),
+            ],
           ),
-        ],
+        ),
+      );
+    }
+
+    if (_locationError != null || _currentPosition == null) {
+      return SliverToBoxAdapter(child: SizedBox.shrink());
+    }
+
+    final lat = _currentPosition!.latitude;
+    final lng = _currentPosition!.longitude;
+
+    return SliverPadding(
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+      sliver: StreamBuilder<List<HouseModel>>(
+        stream: HouseService().getHousesNearMeStream(
+          userLat: lat,
+          userLng: lng,
+          maxRadiusKm: 50.0,
+        ),
+        builder: (context, snapshot) {
+          if (snapshot.connectionState == ConnectionState.waiting) {
+            return SliverPadding(
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+              sliver: SliverList(
+                delegate: SliverChildBuilderDelegate(
+                  (context, index) => Padding(
+                    padding: const EdgeInsets.only(bottom: 16),
+                    child: HouseCardSkeleton(),
+                  ),
+                  childCount: 3,
+                ),
+              ),
+            );
+          }
+          final houses = snapshot.data ?? [];
+          if (houses.isEmpty) {
+            return SliverToBoxAdapter(child: SizedBox.shrink());
+          }
+          return SliverList(
+            delegate: SliverChildBuilderDelegate(
+              (context, index) {
+                if (index == 0) {
+                  return Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          const Text(
+                            'Houses Near Me',
+                            style: TextStyle(
+                              fontSize: 18,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                          TextButton(
+                            onPressed: () {
+                              Navigator.of(context).push(
+                                MaterialPageRoute(
+                                  builder: (_) => MapAndListScreen(),
+                                ),
+                              );
+                            },
+                            child: const Text('View map'),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 8),
+                      HouseCard(
+                        house: houses[0],
+                        onTap: () {
+                          Navigator.of(context).push(
+                            MaterialPageRoute(
+                              builder: (_) =>
+                                  HouseDetailScreen(house: houses[0]),
+                            ),
+                          );
+                        },
+                      ),
+                    ],
+                  );
+                }
+                final house = houses[index];
+                return Padding(
+                  padding: const EdgeInsets.only(top: 12),
+                  child: HouseCard(
+                    house: house,
+                    onTap: () {
+                      Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder: (_) => HouseDetailScreen(house: house),
+                        ),
+                      );
+                    },
+                  ),
+                );
+              },
+              childCount: houses.length,
+            ),
+          );
+        },
       ),
     );
   }

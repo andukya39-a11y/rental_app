@@ -6,11 +6,19 @@ import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'screens/auth_screen.dart';
 import 'screens/home_screen.dart';
+import 'screens/house_detail_screen.dart';
+import 'screens/my_bookings_screen.dart';
+import 'services/house_service.dart';
 import 'services/firebase_messaging_service.dart';
 import 'constants/app_colors.dart';
 
 final FlutterLocalNotificationsPlugin flutterLocalNotificationsPlugin =
     FlutterLocalNotificationsPlugin();
+
+/// Global navigator key so that FirebaseMessagingService can navigate
+/// even when there is no BuildContext available (e.g. notification taps
+/// from background or terminated state).
+final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 
 Future<void> _initializeLocalNotifications() async {
   const AndroidInitializationSettings initializationSettingsAndroid =
@@ -41,9 +49,14 @@ void main() async {
       projectId: "mwaki-s-zanzi-rentalapp",
     ),
   );
-  await FirebaseAppCheck.instance.activate(
-    androidProvider: AndroidProvider.debug,
-  );
+  try {
+    await FirebaseAppCheck.instance.activate(
+      androidProvider: AndroidProvider.debug,
+    );
+  } catch (e) {
+    // AppCheck may not be enabled in Firebase console yet; non-critical
+    debugPrint('AppCheck activation skipped: $e');
+  }
   await _initializeLocalNotifications();
   FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
   await FirebaseMessagingService().initialize();
@@ -62,32 +75,53 @@ Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
   FirebaseMessagingService().handleBackgroundMessage(message);
 }
 
+/// Navigate to a screen based on notification type and related ID.
+void navigateFromNotification(
+    BuildContext context, String type, String? relatedId) {
+  switch (type) {
+    case 'booking_request':
+    case 'booking_accepted':
+    case 'booking_rejected':
+    case 'booking_cancelled':
+      Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (_) => const MyBookingsScreen(),
+        ),
+      );
+      break;
+    case 'verification':
+      Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (_) => const MyBookingsScreen(),
+        ),
+      );
+      break;
+    default:
+      if (relatedId != null) {
+        HouseService().getHouseById(relatedId).then((house) {
+          if (house != null && context.mounted) {
+            Navigator.of(context).push(
+              MaterialPageRoute(
+                builder: (_) => HouseDetailScreen(house: house),
+              ),
+            );
+          }
+        });
+      }
+      break;
+  }
+}
+
 class MyApp extends StatelessWidget {
   const MyApp({super.key});
 
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Zanzi Renta App',
-      theme: ThemeData(
-        primarySwatch: Colors.teal,
-        scaffoldBackgroundColor: AppColors.background,
-        appBarTheme: const AppBarTheme(
-          backgroundColor: AppColors.primary,
-          foregroundColor: Colors.white,
-          elevation: 0,
-        ),
-        floatingActionButtonTheme: const FloatingActionButtonThemeData(
-          backgroundColor: AppColors.primary,
-          foregroundColor: Colors.white,
-        ),
-        bottomNavigationBarTheme: const BottomNavigationBarThemeData(
-          backgroundColor: AppColors.surface,
-          selectedItemColor: AppColors.primary,
-          unselectedItemColor: AppColors.textSecondary,
-          elevation: 8,
-        ),
-      ),
+      navigatorKey: navigatorKey,
+      title: 'Zanzi Renta',
+      debugShowCheckedModeBanner: false,
+      theme: AppTheme.lightTheme,
       home: StreamBuilder<User?>(
         stream: FirebaseAuth.instance.authStateChanges(),
         builder: (context, snapshot) {
@@ -98,12 +132,14 @@ class MyApp extends StatelessWidget {
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     CircularProgressIndicator(
-                      color: AppColors.primary,
+                      color: Theme.of(context).colorScheme.primary,
                     ),
                     const SizedBox(height: 16),
-                    const Text(
+                    Text(
                       'Initializing...',
-                      style: TextStyle(color: AppColors.textPrimary),
+                      style: TextStyle(
+                        color: Theme.of(context).colorScheme.onSurface,
+                      ),
                     ),
                   ],
                 ),
@@ -115,7 +151,9 @@ class MyApp extends StatelessWidget {
               body: Center(
                 child: Text(
                   'Error: ${snapshot.error}',
-                  style: TextStyle(color: AppColors.error),
+                  style: TextStyle(
+                    color: Theme.of(context).colorScheme.error,
+                  ),
                 ),
               ),
             );
