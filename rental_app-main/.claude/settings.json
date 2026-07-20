@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(xargs sed -i '' 's/package:rental_app\\\\//package:zanzrental\\\\//g')",
+      "Bash(grep -v \".dart:$\")",
+      "Bash(xargs sed -i '' 's|package:rental_app/|package:zanzrental/|g')",
+      "Bash(firebase --version)"
+    ]
+  }
+}

@@ -1,0 +1,136 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ── Helper functions ────────────────────────────────────────────
+    function isAuth() {
+      return request.auth != null;
+    }
+
+    function uid() {
+      return request.auth.uid;
+    }
+
+    function isOwner(resource) {
+      return resource.data.userId == uid();
+    }
+
+    function userRole() {
+      return get(/databases/$(database)/documents/users/$(uid())).data.roleName;
+    }
+
+    function isAdmin() {
+      return userRole() in ['Super Admin', 'Technical Admin', 'Moderator'];
+    }
+
+    function isSheha() {
+      return userRole() == 'Sheha';
+    }
+
+    // Keys a Sheha is allowed to write during verification
+    function shehaVerificationKeys() {
+      return ['status', 'verificationStatus', 'isVerified',
+              'verifiedAt', 'verifiedBy',
+              'rejectionReason', 'rejectedAt', 'rejectedBy'];
+    }
+
+    // ── Users ───────────────────────────────────────────────────────
+    match /users/{userId} {
+      // Anyone authenticated can read any user profile (needed for listings/bookings display)
+      allow read: if isAuth();
+      // Users can only write their own document; admins can write any
+      allow create: if isAuth() && uid() == userId;
+      allow update: if isAuth() && (uid() == userId || isAdmin());
+      allow delete: if isAuth() && isAdmin();
+    }
+
+    // ── Properties ──────────────────────────────────────────────────
+    match /properties/{propertyId} {
+      // Anyone authenticated can read properties (browse listings)
+      allow read: if isAuth();
+      // Only the owner can create their own listing
+      allow create: if isAuth() && request.resource.data.userId == uid();
+      // Owner can update their own listing; admins can update anything;
+      // Sheha can update only verification-related fields (approve/reject)
+      allow update: if isAuth() && (
+        isOwner(resource) ||
+        isAdmin() ||
+        (isSheha() && request.resource.data.diff(resource.data).affectedKeys()
+            .hasOnly(shehaVerificationKeys()))
+      );
+      allow delete: if isAuth() && (isOwner(resource) || isAdmin());
+    }
+
+    // ── Bookings ────────────────────────────────────────────────────
+    match /bookings/{bookingId} {
+      // Tenant or landlord (or admin) can read
+      allow read: if isAuth() && (
+        uid() == resource.data.tenantId ||
+        uid() == resource.data.landlordId ||
+        isAdmin()
+      );
+      // Tenant creates booking with their own uid as tenantId
+      allow create: if isAuth() && request.resource.data.tenantId == uid();
+      // Landlord can update status/message; tenant can cancel; admin can do anything
+      allow update: if isAuth() && (
+        uid() == resource.data.landlordId ||
+        (uid() == resource.data.tenantId && request.resource.data.status == 'cancelled') ||
+        isAdmin()
+      );
+      allow delete: if isAuth() && (
+        uid() == resource.data.tenantId || isAdmin()
+      );
+    }
+
+    // ── Notifications ───────────────────────────────────────────────
+    match /notifications/{userId} {
+      allow read, write: if isAuth() && uid() == userId;
+
+      match /items/{itemId} {
+        allow read, write: if isAuth() && uid() == userId;
+      }
+    }
+
+    // ── Fraud Reports ───────────────────────────────────────────────
+    match /fraud_reports/{reportId} {
+      // Authenticated users can create reports
+      allow create: if isAuth();
+      // Only admins can read all reports or update (resolve) them
+      allow read, update: if isAuth() && isAdmin();
+      allow delete: if false;
+    }
+
+    // ── Support Tickets ─────────────────────────────────────────────
+    match /support_tickets/{ticketId} {
+      // Owner of the ticket or admins can read
+      allow read: if isAuth() && (
+        uid() == resource.data.userId || isAdmin()
+      );
+      // Authenticated users can create tickets
+      allow create: if isAuth() && request.resource.data.userId == uid();
+      // Only admins can update (close/reply to) tickets
+      allow update: if isAuth() && isAdmin();
+      allow delete: if false;
+    }
+
+    // ── Payments ────────────────────────────────────────────────────
+    match /payments/{paymentId} {
+      allow read: if isAuth() && (
+        uid() == resource.data.userId || isAdmin()
+      );
+      allow create: if isAuth() && request.resource.data.userId == uid();
+      allow update: if isAuth() && isAdmin();
+      allow delete: if false;
+    }
+
+    // ── Verification Requests ───────────────────────────────────────
+    match /verification_requests/{reqId} {
+      allow read: if isAuth() && (
+        uid() == resource.data.userId || isAdmin()
+      );
+      allow create: if isAuth() && request.resource.data.userId == uid();
+      allow update: if isAuth() && isAdmin();
+      allow delete: if false;
+    }
+  }
+}

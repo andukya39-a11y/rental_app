@@ -1,0 +1,52 @@
+# Dart and Flutter specific
+/build/
+.dart_tool/
+.packages
+.pub
+# Android specific
+/android/app/debug/
+/android/app/profile/
+/android/app/build/
+/android/app/src/debug/
+/android/app/src/profile/
+/.android/
+# iOS specific
+/ios/Flutter/App.framework
+/ios/Flutter/Flutter.podspec
+/ios/Flutter/Flutter.xcodeproj
+/ios/Flutter/Generated.xcconfig
+/ios/Flutter/Generated.pluginRegistrant.*
+/ios/Flutter/*.dSYM
+/ios/Flutter/App.framework.dSYM
+/ios/Flutter/Flutter.podspec.dSYM
+/ios/Flutter/Flutter.xcodeproj/*
+!/ios/Flutter/Flutter.xcodeproj/project.pbxproj
+/ios/Flutter/Generated.xcconfig.dSYM
+/ios/Flutter/Generated.pluginRegistrant.*.dSYM
+/ios/Pods/
+/ios/.symlinks/
+/ios/Flutter/Flutter-Generated.xcconfig
+# IDE and editor specific
+.idea/
+*.iml
+*.ipr
+*.iws
+.vscode/
+*.sublime-workspace
+*.sublime-project
+# Miscellaneous
+*.log
+*.lock
+.DS_Store
+Thumbs.db
+# Flutter web build
+/web/
+# Firebase specific
+firebase.json
+.firebaserc
+# Release APK and AAB
+/app-release.apk
+/app-release.aab
+# Keystore files (if you store them in the project, otherwise remove)
+#/key.jks
+#/key.properties
